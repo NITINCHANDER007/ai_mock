@@ -1,36 +1,90 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# 🎙️ InterviewAI - Autonomous AI Mock Interviewer
 
-## Getting Started
+An intelligent, real-time voice mock interviewer web application powered by **Next.js**, **Google Gemini**, the **Web Speech API**, and **SpeechSynthesis**. Practice technical, behavioral, and domain interviews with an adaptive AI recruiter that speaks out loud, listens to your responses, handles conversational barge-in interruptions, and delivers a detailed performance scorecard with recruiter feedback.
 
-First, run the development server:
+---
+
+## ✨ Features
+
+- **🗣️ Natural Turn-Taking Voice Engine**:
+  - Spoken questions using browser `SpeechSynthesis` with female voice auto-selection.
+  - Hands-free speech recognition via the browser `SpeechRecognition` API.
+  - Auto-submits answers after a brief natural pause (no button clicks needed).
+  - **Barge-In Interruption**: Start speaking at any moment to politely interrupt the interviewer, just like in real life.
+- **⚡ Powered by Google Gemini Flash**:
+  - Fast, context-aware question formulation using `@google/genai`.
+  - Adapts difficulty based on experience level (*Fresher*, *1-3 yrs*, *3+ yrs*).
+  - Supports tailored interviews for *Software Engineer, Data Analyst, Product Manager, Designer, HR, Marketing, Sales, Customer Support*, and custom roles.
+- **🌐 Multilingual Support**:
+  - **English**, **Hindi (हिंदी)**, and **Hinglish** (natural conversational Roman-script Hindi + English blend).
+- **📄 Resume & Job Description Parsing**:
+  - Upload PDF or TXT resumes and job descriptions.
+  - Generates personalized, targeted interview questions based on your projects and requirements.
+- **📹 Self-View Camera Preview**:
+  - Top-right mirrored self-preview camera with echo cancellation and noise suppression.
+  - Strictly client-side (no video is recorded or uploaded).
+- **📊 Comprehensive Feedback Report**:
+  - Overall score out of 10.
+  - Key candidate strengths.
+  - Targeted areas for improvement.
+  - Executive recruiter summary notes.
+
+---
+
+## 🛠️ Tech Stack
+
+- **Framework**: Next.js 16 (App Router) + React 19
+- **Styling**: Tailwind CSS with Cyber-Mesh Dark Glassmorphism UI
+- **AI SDK**: Official `@google/genai` SDK
+- **Speech**: Browser Web Speech API (`SpeechRecognition` & `SpeechSynthesis`)
+- **Document Parsing**: `unpdf` for server-side PDF text extraction
+- **Icons**: `lucide-react`
+
+---
+
+## 🚀 Getting Started
+
+### 1. Clone the repository
+
+```bash
+git clone https://github.com/NITINCHANDER007/AI_MOCK.git
+cd AI_MOCK
+```
+
+### 2. Install dependencies
+
+```bash
+npm install
+```
+
+### 3. Configure your Gemini API Key
+
+Create a `.env.local` file in the root directory:
+
+```env
+GEMINI_API_KEY=your_gemini_api_key_here
+```
+
+> Get your API key from [Google AI Studio](https://aistudio.google.com/).
+
+### 4. Run the development server
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000) in your browser (Google Chrome or Chromium-based browsers recommended for Web Speech API support).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+---
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## 🎧 Best Experience Tips
 
-## Learn More
+- **Use Headphones**: Recommended to eliminate room echo and avoid mic feedback.
+- **Grant Mic & Camera Permissions**: Allow browser permissions when prompted.
+- **Browser Compatibility**: Works best in Google Chrome, Microsoft Edge, and modern Chromium browsers with Web Speech API support.
 
-To learn more about Next.js, take a look at the following resources:
+---
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## 📄 License
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+MIT License. Feel free to use and customize for your own mock interview practice!
