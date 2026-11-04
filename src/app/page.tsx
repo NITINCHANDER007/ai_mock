@@ -5,7 +5,7 @@ import SetupForm from '@/components/SetupForm';
 import InterviewRoom from '@/components/InterviewRoom';
 import SummaryScreen from '@/components/SummaryScreen';
 import { ChatMessage, InterviewConfig, InterviewSummary } from '@/types/interview';
-import { Sparkles, Bot, AlertCircle, Cpu } from 'lucide-react';
+import { Bot, AlertCircle } from 'lucide-react';
 
 type AppScreen = 'setup' | 'interview' | 'summary';
 

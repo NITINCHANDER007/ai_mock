@@ -2,7 +2,6 @@
 
 import React, { useState, useEffect } from 'react';
 import {
-  Award,
   CheckCircle2,
   TrendingUp,
   MessageSquareQuote,
@@ -15,7 +14,6 @@ import {
   Check,
   Star,
   Target,
-  ArrowRight,
 } from 'lucide-react';
 import { InterviewConfig, InterviewSummary } from '@/types/interview';
 

@@ -1,13 +1,12 @@
 import { GoogleGenAI } from '@google/genai';
 
-// Valid Gemini Flash model names kept in centralized constants for easy customization
-export const GEMINI_MODEL = 'gemini-3.5-flash';
+// Active Gemini Flash models prioritized for high availability and low latency
+export const GEMINI_MODEL = 'gemini-3.1-flash-lite';
 export const FALLBACK_GEMINI_MODEL = 'gemini-3.5-flash-lite';
 
 const FLASH_MODELS = [
   GEMINI_MODEL,
   FALLBACK_GEMINI_MODEL,
-  'gemini-flash-latest',
 ];
 
 let aiInstance: GoogleGenAI | null = null;
@@ -23,8 +22,8 @@ export function getGenAI(): GoogleGenAI {
   return aiInstance;
 }
 
-// 6s timeout so if a model is congested, it immediately tries fallback or graceful answer
-const MODEL_TIMEOUT_MS = 6000;
+// 7s timeout per model to give adequate response window without indefinite hanging
+const MODEL_TIMEOUT_MS = 7000;
 
 export async function generateWithFlash(
   prompt: string,

@@ -19,7 +19,6 @@ import {
   Award,
   Layers,
   ArrowRight,
-  ShieldCheck,
 } from 'lucide-react';
 import {
   ExperienceLevel,
@@ -113,6 +112,22 @@ export default function SetupForm({ onStart, isLoading }: SetupFormProps) {
     }
 
     try {
+      const MAX_SIZE = 5 * 1024 * 1024; // 5 MB limit
+      if (file.size > MAX_SIZE) {
+        throw new Error('File exceeds the 5 MB limit.');
+      }
+      if (file.size === 0) {
+        throw new Error('The uploaded file is empty.');
+      }
+      const isPdfOrTxt =
+        file.name.toLowerCase().endsWith('.pdf') ||
+        file.name.toLowerCase().endsWith('.txt') ||
+        file.type === 'application/pdf' ||
+        file.type === 'text/plain';
+      if (!isPdfOrTxt) {
+        throw new Error('Only PDF and TXT files are accepted.');
+      }
+
       const formData = new FormData();
       formData.append('file', file);
 

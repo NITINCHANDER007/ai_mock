@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { extractText } from 'unpdf';
 
+const MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024; // 5 MB
+
 export async function POST(req: NextRequest) {
   try {
     const formData = await req.formData();
@@ -10,23 +12,42 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'No file uploaded' }, { status: 400 });
     }
 
-    const fileName = file.name.toLowerCase();
-    const arrayBuffer = await file.arrayBuffer();
+    if (file.size === 0) {
+      return NextResponse.json(
+        { error: 'The uploaded file is empty' },
+        { status: 400 }
+      );
+    }
 
+    if (file.size > MAX_FILE_SIZE_BYTES) {
+      return NextResponse.json(
+        { error: 'File size exceeds the 5 MB limit' },
+        { status: 400 }
+      );
+    }
+
+    const fileName = file.name.toLowerCase();
+    const isPdf = fileName.endsWith('.pdf') || file.type === 'application/pdf';
+    const isTxt = fileName.endsWith('.txt') || file.type === 'text/plain';
+
+    if (!isPdf && !isTxt) {
+      return NextResponse.json(
+        { error: 'Invalid file type. Only PDF and TXT files are accepted.' },
+        { status: 400 }
+      );
+    }
+
+    const arrayBuffer = await file.arrayBuffer();
     let extracted = '';
 
-    if (fileName.endsWith('.pdf')) {
+    if (isPdf) {
       const { text } = await extractText(new Uint8Array(arrayBuffer));
       if (Array.isArray(text)) {
         extracted = text.join('\n\n');
       } else {
         extracted = text || '';
       }
-    } else if (fileName.endsWith('.txt')) {
-      const decoder = new TextDecoder('utf-8');
-      extracted = decoder.decode(arrayBuffer);
     } else {
-      // Fallback try text decoder
       const decoder = new TextDecoder('utf-8');
       extracted = decoder.decode(arrayBuffer);
     }
@@ -41,4 +62,3 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
-

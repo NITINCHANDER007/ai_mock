@@ -34,10 +34,47 @@ interface InterviewRoomProps {
   isEnding: boolean;
 }
 
-// Extend Window interface for Web Speech API
+// Strict Types for Web Speech API
+interface SpeechRecognitionResultItem {
+  transcript: string;
+}
+
+interface SpeechRecognitionResultList {
+  length: number;
+  [index: number]: {
+    isFinal: boolean;
+    [subIndex: number]: SpeechRecognitionResultItem;
+  };
+}
+
+interface SpeechRecognitionEvent extends Event {
+  resultIndex: number;
+  results: SpeechRecognitionResultList;
+}
+
+interface SpeechRecognitionErrorEvent extends Event {
+  error: string;
+}
+
+interface SpeechRecognitionInstance extends EventTarget {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  start: () => void;
+  stop: () => void;
+  abort: () => void;
+  onresult: ((event: SpeechRecognitionEvent) => void) | null;
+  onerror: ((event: SpeechRecognitionErrorEvent) => void) | null;
+  onend: (() => void) | null;
+}
+
+interface SpeechRecognitionConstructor {
+  new (): SpeechRecognitionInstance;
+}
+
 interface IWindow extends Window {
-  webkitSpeechRecognition?: any;
-  SpeechRecognition?: any;
+  webkitSpeechRecognition?: SpeechRecognitionConstructor;
+  SpeechRecognition?: SpeechRecognitionConstructor;
 }
 
 // Turn-Taking State Machine
@@ -137,10 +174,11 @@ export default function InterviewRoom({
     currentAiQuestionRef.current = currentAiQuestion;
   }, [currentAiQuestion]);
 
-  // Invocation guards
+  // Invocation & barge-in guards
   const hasStartedRef = useRef(false);
   const isRequestInFlightRef = useRef(false);
   const hasPromptedSilenceRef = useRef(false);
+  const isInterruptedRef = useRef(false);
 
   // Timer
   const [timeLeft, setTimeLeft] = useState(config.duration * 60);
@@ -156,8 +194,12 @@ export default function InterviewRoom({
   const captionFadeTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Speech Recognition (STT) state
-  const recognitionRef = useRef<any>(null);
-  const [isSpeechSupported, setIsSpeechSupported] = useState(true);
+  const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
+  const [isSpeechSupported, setIsSpeechSupported] = useState(() => {
+    if (typeof window === 'undefined') return true;
+    const win = window as unknown as IWindow;
+    return !!(win.SpeechRecognition || win.webkitSpeechRecognition);
+  });
   const [isMuted, setIsMuted] = useState(false);
   const isMutedRef = useRef(false);
   useEffect(() => {
@@ -221,14 +263,28 @@ export default function InterviewRoom({
     }
 
     // Clear all pending timers
-    if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
-    if (promptSilenceTimerRef.current) clearTimeout(promptSilenceTimerRef.current);
-    if (captionFadeTimeoutRef.current) clearTimeout(captionFadeTimeoutRef.current);
-    if (speechWatchdogRef.current) clearTimeout(speechWatchdogRef.current);
+    if (silenceTimerRef.current) {
+      clearTimeout(silenceTimerRef.current);
+      silenceTimerRef.current = null;
+    }
+    if (promptSilenceTimerRef.current) {
+      clearTimeout(promptSilenceTimerRef.current);
+      promptSilenceTimerRef.current = null;
+    }
+    if (captionFadeTimeoutRef.current) {
+      clearTimeout(captionFadeTimeoutRef.current);
+      captionFadeTimeoutRef.current = null;
+    }
+    if (speechWatchdogRef.current) {
+      clearTimeout(speechWatchdogRef.current);
+      speechWatchdogRef.current = null;
+    }
 
     // Cancel speech synthesis immediately
     if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-      window.speechSynthesis.cancel();
+      try {
+        window.speechSynthesis.cancel();
+      } catch {}
     }
 
     // Abort speech recognition immediately
@@ -325,7 +381,7 @@ export default function InterviewRoom({
   }, [selectDefaultFemaleVoice]);
 
   // -------------------------------------------------------------
-  // 3. Camera Setup with Echo Cancellation
+  // 3. Camera Setup with Echo Cancellation & Safe Cleanup
   // -------------------------------------------------------------
   const startCamera = useCallback(async () => {
     try {
@@ -389,11 +445,77 @@ export default function InterviewRoom({
   };
 
   useEffect(() => {
-    startCamera();
+    let isCancelled = false;
+
+    async function initCamera() {
+      try {
+        if (!navigator?.mediaDevices?.getUserMedia) {
+          if (!isCancelled) setCameraError(true);
+          return;
+        }
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            width: { ideal: 480 },
+            height: { ideal: 360 },
+            facingMode: 'user',
+          },
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+          },
+        });
+
+        if (isCancelled || isInterviewEndedRef.current) {
+          stream.getTracks().forEach((t) => t.stop());
+          return;
+        }
+
+        mediaStreamRef.current = stream;
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+        }
+        if (!isCancelled) {
+          setCameraActive(true);
+          setCameraError(false);
+        }
+      } catch {
+        try {
+          const videoStream = await navigator.mediaDevices.getUserMedia({
+            video: true,
+            audio: false,
+          });
+          if (isCancelled || isInterviewEndedRef.current) {
+            videoStream.getTracks().forEach((t) => t.stop());
+            return;
+          }
+          mediaStreamRef.current = videoStream;
+          if (videoRef.current) {
+            videoRef.current.srcObject = videoStream;
+          }
+          if (!isCancelled) {
+            setCameraActive(true);
+            setCameraError(false);
+          }
+        } catch {
+          if (!isCancelled) {
+            setCameraError(true);
+            setCameraActive(false);
+          }
+        }
+      }
+    }
+
+    initCamera();
+
     return () => {
-      terminateInterviewSession();
+      isCancelled = true;
+      if (mediaStreamRef.current) {
+        mediaStreamRef.current.getTracks().forEach((t) => t.stop());
+        mediaStreamRef.current = null;
+      }
     };
-  }, [startCamera, terminateInterviewSession]);
+  }, []);
 
   // -------------------------------------------------------------
   // 4. Centralized `speak()` Engine (Guaranteed Non-Blocking)
@@ -402,6 +524,9 @@ export default function InterviewRoom({
     (text: string, onEnd?: () => void) => {
       if (isInterviewEndedRef.current) return;
 
+      // Reset interrupted flag on new speech turn
+      isInterruptedRef.current = false;
+
       // IMMEDIATELY transition to AI_SPEAKING and update captions so UI never hangs
       dispatch({ type: 'START_AI_SPEAKING' });
       setCaptionSpeaker('AI');
@@ -409,10 +534,12 @@ export default function InterviewRoom({
 
       if (captionFadeTimeoutRef.current) {
         clearTimeout(captionFadeTimeoutRef.current);
+        captionFadeTimeoutRef.current = null;
       }
 
       if (speechWatchdogRef.current) {
         clearTimeout(speechWatchdogRef.current);
+        speechWatchdogRef.current = null;
       }
 
       if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
@@ -452,7 +579,12 @@ export default function InterviewRoom({
         hasCompleted = true;
         if (speechWatchdogRef.current) {
           clearTimeout(speechWatchdogRef.current);
+          speechWatchdogRef.current = null;
         }
+
+        // If candidate barged in, do NOT overwrite their speaking state!
+        if (isInterruptedRef.current) return;
+
         if (turnStateRef.current === 'AI_SPEAKING') {
           if (onEnd) {
             onEnd();
@@ -531,7 +663,10 @@ export default function InterviewRoom({
 
           if (isInterviewEndedRef.current) return false;
 
-          const data = await res.json().catch(() => null);
+          const data = (await res.json().catch(() => null)) as {
+            question?: string;
+            error?: string;
+          } | null;
 
           // Validate Gemini response
           if (!res.ok || !data?.question || !data.question.trim()) {
@@ -565,16 +700,18 @@ export default function InterviewRoom({
           });
 
           return true; // Successfully received and initiated question!
-        } catch (err: any) {
+        } catch (err: unknown) {
           if (timeoutId) clearTimeout(timeoutId);
           if (isInterviewEndedRef.current) return false;
 
+          const errorInstance = err as Error;
+
           // If aborted by user-initiated action (not our timeout), stop retrying
-          if (err.name === 'AbortError' && !isTimedOut) {
+          if (errorInstance?.name === 'AbortError' && !isTimedOut) {
             return false;
           }
 
-          lastError = err instanceof Error ? err : new Error(String(err));
+          lastError = errorInstance instanceof Error ? errorInstance : new Error(String(err));
           console.warn(
             `[InterviewRoom] Attempt ${attempt}/${MAX_REQUEST_RETRIES + 1} failed: ${lastError.message}`
           );
@@ -631,8 +768,14 @@ export default function InterviewRoom({
       isRequestInFlightRef.current = true;
       setConnectionError(false);
 
-      if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
-      if (promptSilenceTimerRef.current) clearTimeout(promptSilenceTimerRef.current);
+      if (silenceTimerRef.current) {
+        clearTimeout(silenceTimerRef.current);
+        silenceTimerRef.current = null;
+      }
+      if (promptSilenceTimerRef.current) {
+        clearTimeout(promptSilenceTimerRef.current);
+        promptSilenceTimerRef.current = null;
+      }
 
       finalTranscriptRef.current = '';
       currentSpokenTextRef.current = '';
@@ -692,7 +835,6 @@ export default function InterviewRoom({
     const SpeechRecognition = win.SpeechRecognition || win.webkitSpeechRecognition;
 
     if (!SpeechRecognition) {
-      setIsSpeechSupported(false);
       return;
     }
 
@@ -706,7 +848,7 @@ export default function InterviewRoom({
         ? 'en-IN'
         : 'en-US';
 
-    recognition.onresult = (event: any) => {
+    recognition.onresult = (event: SpeechRecognitionEvent) => {
       if (isInterviewEndedRef.current) return;
 
       let interim = '';
@@ -728,12 +870,14 @@ export default function InterviewRoom({
 
       // Barge-in interruption
       if (turnStateRef.current === 'AI_SPEAKING' && wordsSpoken >= 2) {
+        isInterruptedRef.current = true;
         if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
           window.speechSynthesis.cancel();
         }
 
         if (speechWatchdogRef.current) {
           clearTimeout(speechWatchdogRef.current);
+          speechWatchdogRef.current = null;
         }
 
         setMessages((prev) => {
@@ -756,6 +900,7 @@ export default function InterviewRoom({
         dispatch({ type: 'START_USER_SPEAKING' });
         if (promptSilenceTimerRef.current) {
           clearTimeout(promptSilenceTimerRef.current);
+          promptSilenceTimerRef.current = null;
         }
       }
 
@@ -767,13 +912,17 @@ export default function InterviewRoom({
 
           if (captionFadeTimeoutRef.current) {
             clearTimeout(captionFadeTimeoutRef.current);
+            captionFadeTimeoutRef.current = null;
           }
         }
 
-        if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+        if (silenceTimerRef.current) {
+          clearTimeout(silenceTimerRef.current);
+          silenceTimerRef.current = null;
+        }
 
         silenceTimerRef.current = setTimeout(() => {
-          if (isInterviewEndedRef.current) return;
+          if (isInterviewEndedRef.current || isRequestInFlightRef.current) return;
           const finalSpoken = currentSpokenTextRef.current.trim();
           const words = countWords(finalSpoken);
 
@@ -784,7 +933,7 @@ export default function InterviewRoom({
       }
     };
 
-    recognition.onerror = (event: any) => {
+    recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
       if (event.error === 'not-allowed') {
         setIsSpeechSupported(false);
       }
@@ -797,9 +946,14 @@ export default function InterviewRoom({
         !isMutedRef.current &&
         (current === 'USER_LISTENING' || current === 'USER_SPEAKING' || current === 'AI_SPEAKING')
       ) {
-        try {
-          recognition.start();
-        } catch {}
+        // Safe debounced restart to avoid Chromium already-started throw
+        setTimeout(() => {
+          if (!isInterviewEndedRef.current && !isMutedRef.current && recognitionRef.current) {
+            try {
+              recognitionRef.current.start();
+            } catch {}
+          }
+        }, 150);
       }
     };
 
@@ -810,9 +964,18 @@ export default function InterviewRoom({
     } catch {}
 
     return () => {
-      if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
-      if (promptSilenceTimerRef.current) clearTimeout(promptSilenceTimerRef.current);
-      if (speechWatchdogRef.current) clearTimeout(speechWatchdogRef.current);
+      if (silenceTimerRef.current) {
+        clearTimeout(silenceTimerRef.current);
+        silenceTimerRef.current = null;
+      }
+      if (promptSilenceTimerRef.current) {
+        clearTimeout(promptSilenceTimerRef.current);
+        promptSilenceTimerRef.current = null;
+      }
+      if (speechWatchdogRef.current) {
+        clearTimeout(speechWatchdogRef.current);
+        speechWatchdogRef.current = null;
+      }
       recognition.abort();
     };
   }, [config.language, sendAnswerToGemini]);
@@ -826,7 +989,10 @@ export default function InterviewRoom({
     if (turnState === 'USER_LISTENING') {
       ensureRecognitionStarted();
 
-      if (promptSilenceTimerRef.current) clearTimeout(promptSilenceTimerRef.current);
+      if (promptSilenceTimerRef.current) {
+        clearTimeout(promptSilenceTimerRef.current);
+        promptSilenceTimerRef.current = null;
+      }
 
       promptSilenceTimerRef.current = setTimeout(() => {
         if (
@@ -857,7 +1023,7 @@ export default function InterviewRoom({
   }, [turnState, config.language, ensureRecognitionStarted, speak, connectionError]);
 
   // -------------------------------------------------------------
-  // 9. Initial Start with Guaranteed Cleanup
+  // 9. Initial Start with Strict Mode Guard
   // -------------------------------------------------------------
   useEffect(() => {
     if (hasStartedRef.current || isInterviewEndedRef.current) return;
@@ -900,9 +1066,19 @@ export default function InterviewRoom({
     initialStart();
 
     return () => {
-      terminateInterviewSession();
+      // Clean up speech and timers on unmount
+      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+        try {
+          window.speechSynthesis.cancel();
+        } catch {}
+      }
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.abort();
+        } catch {}
+      }
     };
-  }, [config, executeQuestionRequest, speak, terminateInterviewSession]);
+  }, [config, executeQuestionRequest, speak]);
 
   // -------------------------------------------------------------
   // 10. Manual Controls, Retry & "Tap to proceed" Handling
@@ -1012,6 +1188,10 @@ export default function InterviewRoom({
   const handleManualSendTyped = () => {
     const text = typedAnswer.trim();
     if (!text || turnState === 'PROCESSING' || turnState === 'AI_THINKING') return;
+    if (silenceTimerRef.current) {
+      clearTimeout(silenceTimerRef.current);
+      silenceTimerRef.current = null;
+    }
     setShowTypeInput(false);
     sendAnswerToGemini(text);
   };

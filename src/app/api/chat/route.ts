@@ -91,20 +91,21 @@ ${
     }
 
     return NextResponse.json({ question: question.trim() });
-  } catch (error: any) {
-    const rawStatus = error?.status || error?.code;
+  } catch (error: unknown) {
+    const errObj = error as { status?: number; code?: number; message?: string; stack?: string };
+    const rawStatus = errObj?.status || errObj?.code;
     const httpStatus =
       typeof rawStatus === 'number' && rawStatus >= 400 && rawStatus < 600
         ? rawStatus
         : 500;
-    const message = error?.message || 'Failed to generate interview question';
+    const message = errObj?.message || 'Failed to generate interview question';
 
     // Log full error to terminal as requested
     console.error('[API /api/chat Error]:', {
       status: httpStatus,
       message,
       error,
-      stack: error?.stack,
+      stack: errObj?.stack,
     });
 
     return NextResponse.json(
