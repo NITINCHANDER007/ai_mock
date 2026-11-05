@@ -122,13 +122,27 @@ INTERVIEW RULES:
 2. Ask ONE question at a time. Never dump multiple questions together.
 3. DO NOT provide answers, feedback, hints, or ratings during the live interview.
 4. Keep questions concise (1 to 2 sentences) so it feels like a realistic spoken interview.
-5. Briefly acknowledge the candidate's last answer in a natural conversational way, then ask your single next interview question or an insightful follow-up.
-6. Interview target: ${config.duration} minutes (approximately ${totalQuestionsTarget} total questions). Questions asked so far: ${questionsAskedSoFar}.
+5. Briefly acknowledge the candidate's last answer in a natural conversational way, then ask your single question.
+6. Target interview duration: ${config.duration} minutes (~${totalQuestionsTarget} main questions). Questions asked so far: ${questionsAskedSoFar}.
 ${
   isNearEnd
-    ? '7. The scheduled interview duration is almost over. Please ask one final wrap-up question or give a brief professional closing asking if the candidate has any questions before wrapping up.'
+    ? '7. The scheduled interview duration is almost over. Please ask one final wrap-up question or conclude professionally.'
     : ''
 }
+
+STRUCTURED OUTPUT FORMAT:
+You MUST respond strictly with a valid JSON object in this exact schema:
+{
+  "text": "Your spoken acknowledgment and single question here",
+  "type": "new_question" | "follow_up" | "closing"
+}
+
+Rules for "type":
+- "new_question": Use this when moving to a brand new main question or interview topic, or for the opening greeting question.
+- "follow_up": Use this when probing deeper, clarifying, or digging into what the candidate just answered on the same topic.
+- "closing": Use this when concluding the interview or asking if the candidate has final questions.
+
+IMPORTANT: Output ONLY the JSON object. Do not wrap in markdown fences or add explanatory text.
 
 ${config.resumeText ? `CANDIDATE RESUME DETAILS:\n"""\n${config.resumeText}\n"""\nAsk questions based on their projects and experience.` : ''}
 
@@ -138,14 +152,63 @@ ${config.jdText ? `TARGET JOB DESCRIPTION:\n"""\n${config.jdText}\n"""\nTest the
     // Multi-turn contents array conforming to Gemini API specification
     const contents = convertToGeminiContents(messages, config);
 
-    const question = await generateWithFlash(contents, systemInstruction);
+    const raw = await generateWithFlash(contents, systemInstruction);
 
-    // Validate generated question: treat empty or missing text as an error
-    if (!question || !question.trim()) {
-      throw new Error('Gemini returned an empty or invalid question');
+    // Validate generated text: treat empty or missing text as an error
+    if (!raw || !raw.trim()) {
+      throw new Error('Gemini returned an empty or invalid response');
     }
 
-    return NextResponse.json({ question: question.trim() });
+    // Parse structured JSON response
+    let questionText = '';
+    let questionType: 'new_question' | 'follow_up' | 'closing' =
+      messages.length === 0 ? 'new_question' : isNearEnd ? 'closing' : 'follow_up';
+
+    let jsonString = raw.trim();
+    if (jsonString.startsWith('```')) {
+      jsonString = jsonString
+        .replace(/^```(?:json)?\s*/i, '')
+        .replace(/\s*```$/i, '')
+        .trim();
+    }
+
+    try {
+      const parsed = JSON.parse(jsonString);
+      if (parsed.text && typeof parsed.text === 'string') {
+        questionText = parsed.text.trim();
+      }
+      if (
+        parsed.type === 'new_question' ||
+        parsed.type === 'follow_up' ||
+        parsed.type === 'closing'
+      ) {
+        questionType = parsed.type;
+      }
+    } catch {
+      // Fallback regex extraction if model enclosed JSON in other text
+      const match = jsonString.match(/\{[\s\S]*"text"[\s\S]*\}/);
+      if (match) {
+        try {
+          const parsed = JSON.parse(match[0]);
+          if (parsed.text) questionText = parsed.text.trim();
+          if (parsed.type) questionType = parsed.type;
+        } catch {
+          questionText = raw.trim();
+        }
+      } else {
+        questionText = raw.trim();
+      }
+    }
+
+    if (!questionText) {
+      questionText = raw.trim();
+    }
+
+    return NextResponse.json({
+      question: questionText,
+      text: questionText,
+      type: questionType,
+    });
   } catch (error: unknown) {
     const errObj = error as { status?: number; code?: number; message?: string; stack?: string };
     const rawStatus = errObj?.status || errObj?.code;

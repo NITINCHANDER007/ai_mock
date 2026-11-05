@@ -21,10 +21,12 @@ import {
   User,
   Sparkles,
   Volume2,
+  VolumeX,
   X,
   Loader2,
   Headphones,
   ArrowRight,
+  GripHorizontal,
 } from 'lucide-react';
 import { ChatMessage, InterviewConfig } from '@/types/interview';
 
@@ -112,32 +114,88 @@ function turnReducer(state: TurnState, action: TurnAction): TurnState {
 // Tuned parameters for fast, natural conversational turn-taking
 const SILENCE_MS = 1400; // 1.4s silence triggers speech completion
 const PROMPT_SILENCE_MS = 15000; // 15s silence triggers gentle reminder
-const MIN_WORDS_TO_SUBMIT = 2; // Fast submission for 2+ words
+const MIN_WORDS_TO_SUBMIT = 3; // Never send an answer shorter than 3 words
+const ECHO_COOLDOWN_MS = 800; // 800ms cooldown after AI speech ends to ignore echo
+const BARGE_IN_ENABLED_DEFAULT = false; // Default false when headphones are not confirmed
 
 // Request configuration with 20s timeout and strict retry policy
 const MAX_REQUEST_RETRIES = 2; // up to 2 retries (important for 429 and 503)
 const RETRY_DELAY_MS = 2000; // 2s delay between retries
 const REQUEST_TIMEOUT_MS = 20000; // 20s timeout using AbortController
 
-function getSmartFallback(config: InterviewConfig, isFirst: boolean): string {
+/**
+ * Compares user text against the AI's sentence.
+ * If >50% of the recognized words appear in the AI's current sentence, treat as echo.
+ */
+function isEchoOfAi(userText: string, aiText: string): boolean {
+  if (!userText.trim() || !aiText.trim()) return false;
+
+  const normalize = (str: string) =>
+    str
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N}\s]/gu, '')
+      .split(/\s+/)
+      .filter((w) => w.length > 1);
+
+  const userWords = normalize(userText);
+  const aiWords = new Set(normalize(aiText));
+
+  if (userWords.length === 0 || aiWords.size === 0) return false;
+
+  let matchCount = 0;
+  for (const word of userWords) {
+    if (aiWords.has(word)) {
+      matchCount++;
+    }
+  }
+
+  return matchCount / userWords.length > 0.5;
+}
+
+function countWords(text: string): number {
+  return text.trim().split(/\s+/).filter(Boolean).length;
+}
+
+function getSmartFallback(
+  config: InterviewConfig,
+  isFirst: boolean
+): { text: string; type: 'new_question' | 'follow_up' | 'closing' } {
   const lang = config.language;
   if (isFirst) {
     if (lang === 'Hindi') {
-      return 'नमस्ते! साक्षात्कार में आपका स्वागत है। बातचीत शुरू करने के लिए, कृपया अपने और अपने अनुभव के बारे में संक्षेप में बताइए।';
+      return {
+        text: 'नमस्ते! साक्षात्कार में आपका स्वागत है। बातचीत शुरू करने के लिए, कृपया अपने और अपने अनुभव के बारे में संक्षेप में बताइए।',
+        type: 'new_question',
+      };
     }
     if (lang === 'Hinglish') {
-      return 'Hello, welcome to your mock interview! To get started, please apne background aur experience ke baare me thoda batayein.';
+      return {
+        text: 'Hello, welcome to your mock interview! To get started, please apne background aur experience ke baare me thoda batayein.',
+        type: 'new_question',
+      };
     }
-    return "Welcome to the interview! It's a pleasure to connect with you today. To get started, could you please introduce yourself and walk me through your background?";
+    return {
+      text: "Welcome to the interview! It's a pleasure to connect with you today. To get started, could you please introduce yourself and walk me through your background?",
+      type: 'new_question',
+    };
   }
 
   if (lang === 'Hindi') {
-    return 'धन्यवाद। क्या आप अपने हालिया काम में आई किसी मुख्य तकनीकी चुनौती और उसे हल करने के अपने दृष्टिकोण के बारे में बता सकते हैं?';
+    return {
+      text: 'धन्यवाद। क्या आप अपने हालिया काम में आई किसी मुख्य तकनीकी चुनौती और उसे हल करने के अपने दृष्टिकोण के बारे में बता सकते हैं?',
+      type: 'new_question',
+    };
   }
   if (lang === 'Hinglish') {
-    return 'Understood. Aap apne most recent project me jo complex challenge solve kiya, uske baare me thoda detail me explain karenge?';
+    return {
+      text: 'Understood. Aap apne most recent project me jo complex challenge solve kiya, uske baare me thoda detail me explain karenge?',
+      type: 'new_question',
+    };
   }
-  return 'Thank you for sharing that. Could you describe a challenging technical or workplace problem you encountered recently, and how you approached resolving it?';
+  return {
+    text: 'Thank you for sharing that. Could you describe a challenging technical or workplace problem you encountered recently, and how you approached resolving it?',
+    type: 'new_question',
+  };
 }
 
 export default function InterviewRoom({
@@ -180,6 +238,31 @@ export default function InterviewRoom({
   const isRequestInFlightRef = useRef(false);
   const hasPromptedSilenceRef = useRef(false);
   const isInterruptedRef = useRef(false);
+  const isTtsActiveRef = useRef(false);
+  const ttsEndedAtRef = useRef<number>(0);
+  const activeTurnIdRef = useRef<string>('');
+
+  // Structured main question counter
+  const [mainQuestionIndex, setMainQuestionIndex] = useState(1);
+
+  // Headphones mode (allows interrupting AI only when confirmed)
+  const [useHeadphones, setUseHeadphones] = useState(BARGE_IN_ENABLED_DEFAULT);
+  const useHeadphonesRef = useRef(BARGE_IN_ENABLED_DEFAULT);
+  useEffect(() => {
+    useHeadphonesRef.current = useHeadphones;
+  }, [useHeadphones]);
+
+  // AI Voice Mute state
+  const [isAiMuted, setIsAiMuted] = useState(false);
+  const isAiMutedRef = useRef(false);
+  useEffect(() => {
+    isAiMutedRef.current = isAiMuted;
+  }, [isAiMuted]);
+
+  // Draggable Camera PIP state
+  const [cameraPos, setCameraPos] = useState<{ x: number; y: number } | null>(null);
+  const isDraggingCameraRef = useRef(false);
+  const dragOffsetRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
 
   // Timer
   const [timeLeft, setTimeLeft] = useState(config.duration * 60);
@@ -237,8 +320,8 @@ export default function InterviewRoom({
     selectedVoiceNameRef.current = selectedVoiceName;
   }, [selectedVoiceName]);
 
-  const totalQuestionsTarget = Math.max(4, Math.round(config.duration / 2.5));
-  const questionsAskedCount = messages.filter((m) => m.role === 'interviewer').length;
+  // Calculate total main questions based on chosen duration (~1 question per 2.5 min)
+  const totalQuestionsTarget = Math.max(3, Math.round(config.duration / 2.5));
 
   // -------------------------------------------------------------
   // 1. Terminate Session & Kill All In-Flight Speech / Requests
@@ -543,6 +626,22 @@ export default function InterviewRoom({
         speechWatchdogRef.current = null;
       }
 
+      // If AI Voice is muted: show captions, pause briefly for reading, and advance to user turn
+      if (isAiMutedRef.current) {
+        isTtsActiveRef.current = false;
+        ttsEndedAtRef.current = Date.now();
+        const wordsCount = text.trim().split(/\s+/).length;
+        const readingMs = Math.min(6000, Math.max(2200, wordsCount * 170));
+        speechWatchdogRef.current = setTimeout(() => {
+          if (isInterviewEndedRef.current) return;
+          finalTranscriptRef.current = '';
+          currentSpokenTextRef.current = '';
+          if (onEnd) onEnd();
+          else dispatch({ type: 'START_USER_LISTENING' });
+        }, readingMs);
+        return;
+      }
+
       if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
         if (onEnd) onEnd();
         else dispatch({ type: 'START_USER_LISTENING' });
@@ -570,6 +669,8 @@ export default function InterviewRoom({
       utterance.rate = 1.05;
       utterance.pitch = 1.05;
 
+      isTtsActiveRef.current = true;
+
       // Safety watchdog: if Chrome hangs or fails to fire onend, auto-advance
       let hasCompleted = false;
       const wordsCount = text.trim().split(/\s+/).length;
@@ -578,21 +679,36 @@ export default function InterviewRoom({
       const finalizeSpeechTurn = () => {
         if (hasCompleted || isInterviewEndedRef.current) return;
         hasCompleted = true;
+        isTtsActiveRef.current = false;
+        ttsEndedAtRef.current = Date.now();
+
         if (speechWatchdogRef.current) {
           clearTimeout(speechWatchdogRef.current);
           speechWatchdogRef.current = null;
         }
 
+        // Clear recognition buffers immediately so any lingering echoed sound is discarded
+        finalTranscriptRef.current = '';
+        currentSpokenTextRef.current = '';
+
         // If candidate barged in, do NOT overwrite their speaking state!
         if (isInterruptedRef.current) return;
 
-        if (turnStateRef.current === 'AI_SPEAKING') {
-          if (onEnd) {
-            onEnd();
-          } else {
-            dispatch({ type: 'START_USER_LISTENING' });
+        // Echo guard: delay transitioning to USER_LISTENING until after the 800ms cooldown
+        setTimeout(() => {
+          if (isInterviewEndedRef.current) return;
+          // Clear again after cooldown to be 100% sure no echo leaked into buffers
+          finalTranscriptRef.current = '';
+          currentSpokenTextRef.current = '';
+
+          if (turnStateRef.current === 'AI_SPEAKING') {
+            if (onEnd) {
+              onEnd();
+            } else {
+              dispatch({ type: 'START_USER_LISTENING' });
+            }
           }
-        }
+        }, ECHO_COOLDOWN_MS);
       };
 
       speechWatchdogRef.current = setTimeout(() => {
@@ -627,6 +743,10 @@ export default function InterviewRoom({
       let attempt = 0;
       let lastErrorMessage = '';
       let isRetryable = false;
+
+      // Single turn ID guard to prevent double triggers
+      const turnId = `turn-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+      activeTurnIdRef.current = turnId;
 
       while (attempt <= MAX_REQUEST_RETRIES) {
         if (isInterviewEndedRef.current) return false;
@@ -667,12 +787,16 @@ export default function InterviewRoom({
 
           const data = (await res.json().catch(() => null)) as {
             question?: string;
+            text?: string;
+            type?: 'new_question' | 'follow_up' | 'closing';
             error?: string;
             status?: number;
           } | null;
 
+          const nextQ = (data?.text || data?.question || '').trim();
+
           // Check for API errors or empty question response
-          if (!res.ok || !data?.question || !data.question.trim()) {
+          if (!res.ok || !nextQ) {
             const statusCode = res.status;
             const serverMsg =
               data?.error || `Error ${statusCode}: Failed to generate question`;
@@ -702,7 +826,21 @@ export default function InterviewRoom({
             throw new Error(lastErrorMessage);
           }
 
-          const nextQ = data.question.trim();
+          // Double trigger guard: if superseded by a newer turn, drop this stale response
+          if (activeTurnIdRef.current !== turnId) {
+            return false;
+          }
+
+          const qType =
+            data?.type || (isInitialGreeting ? 'new_question' : 'follow_up');
+
+          // Increment mainQuestionIndex ONLY when the AI introduces a new main topic
+          if (!isInitialGreeting && qType === 'new_question') {
+            setMainQuestionIndex((prev) => Math.min(prev + 1, totalQuestionsTarget));
+          } else if (isInitialGreeting) {
+            setMainQuestionIndex(1);
+          }
+
           setConnectionError(false);
           setErrorMessage(null);
 
@@ -768,19 +906,20 @@ export default function InterviewRoom({
 
         // If this is the initial greeting, immediately start the interview with the contextual greeting!
         if (isInitialGreeting) {
-          const fallbackGreeting = getSmartFallback(config, true);
+          const fallback = getSmartFallback(config, true);
+          setMainQuestionIndex(1);
           const initialMsg: ChatMessage = {
             id: `interviewer-${Date.now()}`,
             role: 'interviewer',
-            content: fallbackGreeting,
+            content: fallback.text,
             timestamp: new Date().toLocaleTimeString([], {
               hour: '2-digit',
               minute: '2-digit',
             }),
           };
           setMessages([initialMsg]);
-          setCurrentAiQuestion(fallbackGreeting);
-          speak(fallbackGreeting, () => {
+          setCurrentAiQuestion(fallback.text);
+          speak(fallback.text, () => {
             if (!isInterviewEndedRef.current) {
               dispatch({ type: 'START_USER_LISTENING' });
             }
@@ -795,7 +934,7 @@ export default function InterviewRoom({
 
       return false;
     },
-    [config, speak]
+    [config, speak, totalQuestionsTarget]
   );
 
   // -------------------------------------------------------------
@@ -804,6 +943,34 @@ export default function InterviewRoom({
   const sendAnswerToGemini = useCallback(
     async (finalAnswer: string) => {
       if (isInterviewEndedRef.current || isRequestInFlightRef.current) return;
+
+      const trimmedAnswer = finalAnswer.trim();
+      const wordCount = countWords(trimmedAnswer);
+
+      // Guard: Never send an answer shorter than 3 words
+      if (wordCount < MIN_WORDS_TO_SUBMIT) {
+        console.warn(
+          '[sendAnswerToGemini] Answer ignored: shorter than 3 words (',
+          wordCount,
+          ')'
+        );
+        finalTranscriptRef.current = '';
+        currentSpokenTextRef.current = '';
+        dispatch({ type: 'START_USER_LISTENING' });
+        return;
+      }
+
+      // Guard: Never send text that is mostly the same as the AI's current/last question (echo prevention)
+      if (isEchoOfAi(trimmedAnswer, currentAiQuestionRef.current)) {
+        console.warn(
+          '[sendAnswerToGemini] Answer ignored: echo detected (>50% match with AI question)'
+        );
+        finalTranscriptRef.current = '';
+        currentSpokenTextRef.current = '';
+        dispatch({ type: 'START_USER_LISTENING' });
+        return;
+      }
+
       isRequestInFlightRef.current = true;
       setConnectionError(false);
 
@@ -819,16 +986,16 @@ export default function InterviewRoom({
       finalTranscriptRef.current = '';
       currentSpokenTextRef.current = '';
       hasPromptedSilenceRef.current = false;
-      lastUserAnswerRef.current = finalAnswer;
+      lastUserAnswerRef.current = trimmedAnswer;
 
       dispatch({ type: 'START_PROCESSING' });
       setCaptionSpeaker('You');
-      setCaptionText(finalAnswer);
+      setCaptionText(trimmedAnswer);
 
       const candidateMessage: ChatMessage = {
         id: `candidate-${Date.now()}`,
         role: 'candidate',
-        content: finalAnswer,
+        content: trimmedAnswer,
         timestamp: new Date().toLocaleTimeString([], {
           hour: '2-digit',
           minute: '2-digit',
@@ -853,10 +1020,6 @@ export default function InterviewRoom({
     [executeQuestionRequest]
   );
 
-  const countWords = (text: string) => {
-    return text.trim().split(/\s+/).filter(Boolean).length;
-  };
-
   const ensureRecognitionStarted = useCallback(() => {
     if (isInterviewEndedRef.current || !recognitionRef.current || isMutedRef.current) return;
     try {
@@ -865,7 +1028,7 @@ export default function InterviewRoom({
   }, []);
 
   // -------------------------------------------------------------
-  // 7. Speech Recognition Setup with Fast Turn Detection
+  // 7. Speech Recognition Setup with Strict Echo Guard & Barge-in
   // -------------------------------------------------------------
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -890,6 +1053,27 @@ export default function InterviewRoom({
     recognition.onresult = (event: SpeechRecognitionEvent) => {
       if (isInterviewEndedRef.current) return;
 
+      const isTtsSpeaking = isTtsActiveRef.current;
+      const isWithinEchoCooldown =
+        Date.now() - ttsEndedAtRef.current < ECHO_COOLDOWN_MS;
+
+      // 1. Echo guard: While AI is speaking and for 800ms after it ends, IGNORE all speech recognition
+      if (isTtsSpeaking || isWithinEchoCooldown) {
+        // If headphones are NOT enabled, barge-in is disabled completely!
+        if (!useHeadphonesRef.current) {
+          finalTranscriptRef.current = '';
+          currentSpokenTextRef.current = '';
+          return;
+        }
+
+        // If headphones are enabled, allow interrupting ONLY while actively speaking (not during post-speech cooldown)
+        if (!isTtsSpeaking) {
+          finalTranscriptRef.current = '';
+          currentSpokenTextRef.current = '';
+          return;
+        }
+      }
+
       let interim = '';
 
       for (let i = event.resultIndex; i < event.results.length; ++i) {
@@ -903,39 +1087,67 @@ export default function InterviewRoom({
       }
 
       const combinedText = (finalTranscriptRef.current + interim).trim();
-      currentSpokenTextRef.current = combinedText;
-
       const wordsSpoken = countWords(combinedText);
 
-      // Barge-in interruption
-      if (turnStateRef.current === 'AI_SPEAKING' && wordsSpoken >= 2) {
-        isInterruptedRef.current = true;
-        if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-          window.speechSynthesis.cancel();
+      // 2. Strict Barge-In Interruption (only when AI is speaking and headphones mode is active)
+      if (turnStateRef.current === 'AI_SPEAKING' || isTtsSpeaking) {
+        if (!useHeadphonesRef.current) {
+          finalTranscriptRef.current = '';
+          currentSpokenTextRef.current = '';
+          return;
         }
 
-        if (speechWatchdogRef.current) {
-          clearTimeout(speechWatchdogRef.current);
-          speechWatchdogRef.current = null;
-        }
+        // Only allow interrupting if user speaks 4+ words AND text is NOT similar to AI's current sentence
+        const isEcho = isEchoOfAi(combinedText, currentAiQuestionRef.current);
+        if (wordsSpoken >= 4 && !isEcho) {
+          isInterruptedRef.current = true;
+          isTtsActiveRef.current = false;
+          ttsEndedAtRef.current = 0;
 
-        setMessages((prev) => {
-          if (!prev.length) return prev;
-          const updated = [...prev];
-          const lastMsg = updated[updated.length - 1];
-          if (lastMsg && lastMsg.role === 'interviewer' && !lastMsg.content.includes('(interrupted)')) {
-            updated[updated.length - 1] = {
-              ...lastMsg,
-              content: `${lastMsg.content} (interrupted)`,
-            };
+          if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+            try {
+              window.speechSynthesis.cancel();
+            } catch {}
           }
-          return updated;
-        });
 
-        dispatch({ type: 'START_USER_SPEAKING' });
+          if (speechWatchdogRef.current) {
+            clearTimeout(speechWatchdogRef.current);
+            speechWatchdogRef.current = null;
+          }
+
+          setMessages((prev) => {
+            if (!prev.length) return prev;
+            const updated = [...prev];
+            const lastMsg = updated[updated.length - 1];
+            if (
+              lastMsg &&
+              lastMsg.role === 'interviewer' &&
+              !lastMsg.content.includes('(interrupted)')
+            ) {
+              updated[updated.length - 1] = {
+                ...lastMsg,
+                content: `${lastMsg.content} (interrupted)`,
+              };
+            }
+            return updated;
+          });
+
+          dispatch({ type: 'START_USER_SPEAKING' });
+        } else {
+          // Either too few words or resembles AI's sentence (echo): ignore!
+          return;
+        }
       }
 
+      // If user is listening and speaks:
       if (turnStateRef.current === 'USER_LISTENING' && wordsSpoken >= 1) {
+        // If it looks like an echo of the AI question, discard!
+        if (isEchoOfAi(combinedText, currentAiQuestionRef.current)) {
+          finalTranscriptRef.current = '';
+          currentSpokenTextRef.current = '';
+          return;
+        }
+
         dispatch({ type: 'START_USER_SPEAKING' });
         if (promptSilenceTimerRef.current) {
           clearTimeout(promptSilenceTimerRef.current);
@@ -943,7 +1155,12 @@ export default function InterviewRoom({
         }
       }
 
-      if (turnStateRef.current === 'USER_SPEAKING' || turnStateRef.current === 'USER_LISTENING') {
+      if (
+        turnStateRef.current === 'USER_SPEAKING' ||
+        turnStateRef.current === 'USER_LISTENING'
+      ) {
+        currentSpokenTextRef.current = combinedText;
+
         if (combinedText) {
           setCaptionSpeaker('You');
           setCaptionText(combinedText);
@@ -965,8 +1182,17 @@ export default function InterviewRoom({
           const finalSpoken = currentSpokenTextRef.current.trim();
           const words = countWords(finalSpoken);
 
-          if (words >= MIN_WORDS_TO_SUBMIT && turnStateRef.current === 'USER_SPEAKING') {
+          // Never send an answer shorter than 3 words, and never send text that is mostly the same as the AI's question
+          if (
+            words >= MIN_WORDS_TO_SUBMIT &&
+            turnStateRef.current === 'USER_SPEAKING' &&
+            !isEchoOfAi(finalSpoken, currentAiQuestionRef.current)
+          ) {
             sendAnswerToGemini(finalSpoken);
+          } else if (isEchoOfAi(finalSpoken, currentAiQuestionRef.current)) {
+            finalTranscriptRef.current = '';
+            currentSpokenTextRef.current = '';
+            dispatch({ type: 'START_USER_LISTENING' });
           }
         }, SILENCE_MS);
       }
@@ -1078,19 +1304,20 @@ export default function InterviewRoom({
       } catch (err) {
         console.error('[initialStart] Error:', err);
         // Instant start fallback so candidate never waits
-        const fallbackGreeting = getSmartFallback(config, true);
+        const fallback = getSmartFallback(config, true);
+        setMainQuestionIndex(1);
         const initialMsg: ChatMessage = {
           id: `interviewer-${Date.now()}`,
           role: 'interviewer',
-          content: fallbackGreeting,
+          content: fallback.text,
           timestamp: new Date().toLocaleTimeString([], {
             hour: '2-digit',
             minute: '2-digit',
           }),
         };
         setMessages([initialMsg]);
-        setCurrentAiQuestion(fallbackGreeting);
-        speak(fallbackGreeting, () => {
+        setCurrentAiQuestion(fallback.text);
+        speak(fallback.text, () => {
           if (!isInterviewEndedRef.current) {
             dispatch({ type: 'START_USER_LISTENING' });
           }
@@ -1204,12 +1431,18 @@ export default function InterviewRoom({
 
     // 3. Immediately ask next question / greeting via smart context fallback
     const isInitial = messagesRef.current.length === 0;
-    const fallbackQ = getSmartFallback(config, isInitial);
+    const fallback = getSmartFallback(config, isInitial);
+
+    if (!isInitial) {
+      setMainQuestionIndex((prev) => Math.min(prev + 1, totalQuestionsTarget));
+    } else {
+      setMainQuestionIndex(1);
+    }
 
     const newMsg: ChatMessage = {
       id: `manual-interviewer-${Date.now()}`,
       role: 'interviewer',
-      content: fallbackQ,
+      content: fallback.text,
       timestamp: new Date().toLocaleTimeString([], {
         hour: '2-digit',
         minute: '2-digit',
@@ -1217,13 +1450,69 @@ export default function InterviewRoom({
     };
 
     setMessages((prev) => (isInitial ? [newMsg] : [...prev, newMsg]));
-    setCurrentAiQuestion(fallbackQ);
+    setCurrentAiQuestion(fallback.text);
 
-    speak(fallbackQ, () => {
+    speak(fallback.text, () => {
       if (!isInterviewEndedRef.current) {
         dispatch({ type: 'START_USER_LISTENING' });
       }
     });
+  };
+
+  // Toggle AI Voice Mute
+  const toggleAiMute = () => {
+    if (isAiMuted) {
+      setIsAiMuted(false);
+    } else {
+      setIsAiMuted(true);
+      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+        try {
+          window.speechSynthesis.cancel();
+        } catch {}
+      }
+      isTtsActiveRef.current = false;
+      ttsEndedAtRef.current = Date.now();
+      if (turnStateRef.current === 'AI_SPEAKING') {
+        dispatch({ type: 'START_USER_LISTENING' });
+      }
+    }
+  };
+
+  // Draggable camera pointer handlers
+  const handleCameraPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if ((e.target as HTMLElement).closest('button')) return;
+    const target = e.currentTarget;
+    const rect = target.getBoundingClientRect();
+    dragOffsetRef.current = {
+      x: e.clientX - rect.left,
+      y: e.clientY - rect.top,
+    };
+    isDraggingCameraRef.current = true;
+    target.setPointerCapture(e.pointerId);
+  };
+
+  const handleCameraPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!isDraggingCameraRef.current) return;
+    const containerWidth = 210;
+    const containerHeight = 160;
+    const padding = 12;
+
+    const maxX = window.innerWidth - containerWidth - padding;
+    const maxY = window.innerHeight - containerHeight - padding;
+
+    const nextX = Math.max(padding, Math.min(maxX, e.clientX - dragOffsetRef.current.x));
+    const nextY = Math.max(padding, Math.min(maxY, e.clientY - dragOffsetRef.current.y));
+
+    setCameraPos({ x: nextX, y: nextY });
+  };
+
+  const handleCameraPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (isDraggingCameraRef.current) {
+      isDraggingCameraRef.current = false;
+      try {
+        e.currentTarget.releasePointerCapture(e.pointerId);
+      } catch {}
+    }
   };
 
   const handleManualSendTyped = () => {
@@ -1284,7 +1573,7 @@ export default function InterviewRoom({
       {/* TOP BAR: HUD                                                  */}
       {/* ------------------------------------------------------------- */}
       <header className="relative z-20 px-4 sm:px-6 py-4 flex items-center justify-between bg-gradient-to-b from-[#070A12]/95 via-[#070A12]/80 to-transparent">
-        {/* Top Left: Timer & Headphone tip */}
+        {/* Top Left: Timer & Headphones Toggle */}
         <div className="flex items-center gap-3">
           <div
             className={`flex items-center gap-2 px-3.5 py-1.5 rounded-full text-xs font-mono font-medium border backdrop-blur-xl transition-all shadow-lg ${
@@ -1297,31 +1586,71 @@ export default function InterviewRoom({
             <span>{formatTime(timeLeft)}</span>
           </div>
 
-          <div className="hidden lg:flex items-center gap-2 px-3.5 py-1.5 rounded-full glass-panel border-white/10 text-[11px] text-slate-300">
-            <Headphones className="w-3 h-3 text-cyan-400" />
-            <span>Headphones recommended for zero-echo</span>
-          </div>
+          <button
+            type="button"
+            onClick={() => setUseHeadphones(!useHeadphones)}
+            title={
+              useHeadphones
+                ? 'Headphones ON: You can interrupt the AI'
+                : 'Headphones OFF: Echo protection active (mic listens after AI finishes)'
+            }
+            className={`flex items-center gap-2 px-3.5 py-1.5 rounded-full text-xs font-medium border backdrop-blur-xl transition-all cursor-pointer shadow-md ${
+              useHeadphones
+                ? 'bg-cyan-500/20 text-cyan-200 border-cyan-500/50 shadow-cyan-500/20'
+                : 'glass-panel text-slate-400 hover:text-slate-200 border-white/10'
+            }`}
+          >
+            <Headphones
+              className={`w-3.5 h-3.5 ${
+                useHeadphones ? 'text-cyan-400 animate-pulse' : 'text-slate-400'
+              }`}
+            />
+            <span className="hidden sm:inline">
+              {useHeadphones
+                ? 'Headphones ON (interrupt allowed)'
+                : "I'm using headphones (allow interrupting)"}
+            </span>
+            <span className="sm:hidden">
+              {useHeadphones ? 'Headphones ON' : 'Headphones'}
+            </span>
+          </button>
         </div>
 
         {/* Top Center: Question Counter */}
         <div className="absolute left-1/2 -translate-x-1/2 flex items-center gap-2.5 px-4 py-1.5 rounded-full glass-panel border border-white/10 text-xs font-semibold text-slate-200 shadow-2xl backdrop-blur-xl">
           <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse" />
           <span>
-            Question {Math.max(1, questionsAskedCount)} of ~{totalQuestionsTarget}
+            Question {Math.min(mainQuestionIndex, totalQuestionsTarget)} of ~{totalQuestionsTarget}
           </span>
           <span className="text-slate-500">•</span>
           <span className="text-violet-300 font-normal">{config.role}</span>
         </div>
 
-        {/* Top Right: Voice Selector */}
+        {/* Top Right: Voice Selector & AI Mute */}
         <div className="flex items-center gap-2 relative">
+          <button
+            type="button"
+            onClick={toggleAiMute}
+            title={isAiMuted ? 'Unmute AI Voice' : 'Mute AI Voice'}
+            className={`p-2 rounded-full border transition-all cursor-pointer shadow-lg ${
+              isAiMuted
+                ? 'bg-rose-500/20 border-rose-500/50 text-rose-300'
+                : 'glass-panel hover:bg-slate-800/80 border-white/10 text-slate-300 hover:text-white'
+            }`}
+          >
+            {isAiMuted ? (
+              <VolumeX className="w-3.5 h-3.5 text-rose-400" />
+            ) : (
+              <Volume2 className="w-3.5 h-3.5 text-violet-400" />
+            )}
+          </button>
+
           <button
             type="button"
             onClick={() => setShowVoiceMenu(!showVoiceMenu)}
             title="Interviewer Voice"
             className="flex items-center gap-2 px-3 py-1.5 rounded-full glass-panel hover:bg-slate-800/80 border-white/10 text-xs text-slate-200 transition-all cursor-pointer shadow-lg"
           >
-            <Volume2 className="w-3.5 h-3.5 text-violet-400" />
             <span className="hidden sm:inline max-w-[120px] truncate font-medium">
               {voices.find((v) => v.name === selectedVoiceName)?.name.split(' ')[0] || 'AI Voice'}
             </span>
@@ -1367,10 +1696,33 @@ export default function InterviewRoom({
       </header>
 
       {/* ------------------------------------------------------------- */}
-      {/* USER CAMERA PREVIEW (TOP RIGHT PIP)                           */}
+      {/* USER CAMERA PREVIEW (DRAGGABLE PIP)                           */}
       {/* ------------------------------------------------------------- */}
-      <div className="absolute top-18 right-4 sm:right-6 z-20">
-        <div className="relative group w-[130px] h-[160px] sm:w-[210px] sm:h-[160px] rounded-3xl overflow-hidden glass-panel border border-white/15 shadow-2xl backdrop-blur-2xl flex items-center justify-center">
+      <div
+        onPointerDown={handleCameraPointerDown}
+        onPointerMove={handleCameraPointerMove}
+        onPointerUp={handleCameraPointerUp}
+        onPointerCancel={handleCameraPointerUp}
+        style={
+          cameraPos
+            ? {
+                left: `${cameraPos.x}px`,
+                top: `${cameraPos.y}px`,
+                right: 'auto',
+                bottom: 'auto',
+              }
+            : undefined
+        }
+        className={`fixed z-30 select-none touch-none ${
+          cameraPos ? '' : 'top-18 right-4 sm:right-6'
+        }`}
+      >
+        <div className="relative group w-[130px] h-[160px] sm:w-[210px] sm:h-[160px] rounded-3xl overflow-hidden glass-panel border border-white/15 hover:border-violet-400/40 shadow-2xl backdrop-blur-2xl flex items-center justify-center cursor-grab active:cursor-grabbing transition-colors">
+          {/* Drag Handle Indicator */}
+          <div className="absolute top-2 right-2.5 z-10 opacity-60 group-hover:opacity-100 transition-opacity">
+            <GripHorizontal className="w-3.5 h-3.5 text-slate-300 drop-shadow" />
+          </div>
+
           {cameraActive && !cameraError ? (
             <video
               ref={videoRef}
@@ -1738,6 +2090,24 @@ export default function InterviewRoom({
             }`}
           >
             <Subtitles className="w-4 h-4" />
+          </button>
+
+          {/* Mute/Unmute AI Voice Button */}
+          <button
+            type="button"
+            onClick={toggleAiMute}
+            title={isAiMuted ? 'Unmute AI Voice' : 'Mute AI Voice'}
+            className={`p-3 rounded-full border transition-all cursor-pointer ${
+              isAiMuted
+                ? 'bg-rose-500/20 border-rose-500/50 text-rose-300 shadow-rose-500/20'
+                : 'glass-panel hover:bg-slate-800/80 border-white/10 text-slate-300 hover:text-white'
+            }`}
+          >
+            {isAiMuted ? (
+              <VolumeX className="w-4 h-4 text-rose-400" />
+            ) : (
+              <Volume2 className="w-4 h-4 text-violet-400" />
+            )}
           </button>
 
           {/* Divider */}
