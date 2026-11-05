@@ -1,6 +1,77 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { generateWithFlash, GEMINI_MODEL } from '@/lib/gemini';
+import { generateWithFlash, GEMINI_MODEL, GeminiContentTurn } from '@/lib/gemini';
 import { ChatMessage, InterviewConfig } from '@/types/interview';
+
+function convertToGeminiContents(
+  messages: ChatMessage[],
+  config: InterviewConfig
+): GeminiContentTurn[] {
+  // 1. Map messages to Gemini roles and filter empty text
+  const cleanedTurns = messages
+    .map((m) => {
+      const rawRole = (m.role || '').toLowerCase();
+      const role: 'user' | 'model' =
+        rawRole === 'interviewer' || rawRole === 'assistant' || rawRole === 'ai'
+          ? 'model'
+          : 'user';
+      const text = (m.content || '').trim();
+      return { role, text };
+    })
+    .filter((item) => item.text.length > 0);
+
+  // If no previous messages, candidate initiates the session
+  if (cleanedTurns.length === 0) {
+    return [
+      {
+        role: 'user',
+        parts: [
+          {
+            text: `Start the interview now. Give a brief 1-sentence warm professional welcome and ask me to introduce myself ("Tell me about yourself"). Language: ${config.language}.`,
+          },
+        ],
+      },
+    ];
+  }
+
+  // 2. Strict alternation: merge consecutive messages with identical roles
+  const alternatedTurns: Array<{ role: 'user' | 'model'; text: string }> = [];
+  for (const item of cleanedTurns) {
+    if (alternatedTurns.length === 0) {
+      alternatedTurns.push({ ...item });
+    } else {
+      const prev = alternatedTurns[alternatedTurns.length - 1];
+      if (prev.role === item.role) {
+        prev.text = `${prev.text}\n\n${item.text}`.trim();
+      } else {
+        alternatedTurns.push({ ...item });
+      }
+    }
+  }
+
+  // 3. Ensure the first content item is always role "user"
+  // If the conversation began with the AI greeting (role: "model"), prepend a user trigger turn
+  if (alternatedTurns[0].role === 'model') {
+    alternatedTurns.unshift({
+      role: 'user',
+      text: 'Start the interview.',
+    });
+  }
+
+  // 4. Ensure the last content item is role "user" (the candidate's latest answer)
+  // If the last item was somehow model, request the next question from model
+  if (alternatedTurns[alternatedTurns.length - 1].role === 'model') {
+    alternatedTurns.push({
+      role: 'user',
+      text: 'Please continue and ask your next question.',
+    });
+  }
+
+  // 5. Convert to Gemini Content format: { role, parts: [{ text }] }
+  return alternatedTurns.map((turn) => ({
+    role: turn.role,
+    parts: [{ text: turn.text.trim() }],
+  }));
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -15,11 +86,11 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const isFirstQuestion = messages.length === 0;
     const totalQuestionsTarget = Math.max(4, Math.round(config.duration / 2.5));
     const questionsAskedSoFar = messages.filter(
       (m) => m.role === 'interviewer'
     ).length;
+    const isNearEnd = questionsAskedSoFar >= totalQuestionsTarget;
 
     // Language guidelines
     let languageInstruction = '';
@@ -41,7 +112,7 @@ export async function POST(req: NextRequest) {
       expGuideline = `Target level: 3+ years experience (Senior / Lead). Focus on architectural decisions, trade-offs, system scalability, handling edge cases, cross-team collaboration, and leadership.`;
     }
 
-    // System instruction
+    // System instruction passed via config.systemInstruction, NOT as a history message
     const systemInstruction = `You are a professional, realistic mock interviewer conducting a ${config.type} interview for the position of "${config.role}". Model: ${GEMINI_MODEL}.
 ${languageInstruction}
 ${expGuideline}
@@ -51,39 +122,23 @@ INTERVIEW RULES:
 2. Ask ONE question at a time. Never dump multiple questions together.
 3. DO NOT provide answers, feedback, hints, or ratings during the live interview.
 4. Keep questions concise (1 to 2 sentences) so it feels like a realistic spoken interview.
-5. Interview target: ${config.duration} minutes (approximately ${totalQuestionsTarget} total questions). Questions asked so far: ${questionsAskedSoFar}.
+5. Briefly acknowledge the candidate's last answer in a natural conversational way, then ask your single next interview question or an insightful follow-up.
+6. Interview target: ${config.duration} minutes (approximately ${totalQuestionsTarget} total questions). Questions asked so far: ${questionsAskedSoFar}.
+${
+  isNearEnd
+    ? '7. The scheduled interview duration is almost over. Please ask one final wrap-up question or give a brief professional closing asking if the candidate has any questions before wrapping up.'
+    : ''
+}
 
 ${config.resumeText ? `CANDIDATE RESUME DETAILS:\n"""\n${config.resumeText}\n"""\nAsk questions based on their projects and experience.` : ''}
 
 ${config.jdText ? `TARGET JOB DESCRIPTION:\n"""\n${config.jdText}\n"""\nTest the required skills and competencies.` : ''}
 `;
 
-    let prompt = '';
+    // Multi-turn contents array conforming to Gemini API specification
+    const contents = convertToGeminiContents(messages, config);
 
-    if (isFirstQuestion) {
-      prompt = `Start the interview now. Give a brief 1-sentence warm professional welcome and ask the candidate to introduce themselves ("Tell me about yourself"). Remember to strictly follow the language rule (${config.language}) and keep it concise.`;
-    } else {
-      const transcript = messages
-        .map(
-          (m) =>
-            `${m.role === 'interviewer' ? 'Interviewer' : 'Candidate'}: ${m.content}`
-        )
-        .join('\n\n');
-
-      const isNearEnd = questionsAskedSoFar >= totalQuestionsTarget;
-
-      prompt = `Here is the interview transcript so far:
-
-${transcript}
-
-${
-  isNearEnd
-    ? `The scheduled interview duration is almost over (${questionsAskedSoFar} questions asked). Please ask one final wrap-up question or give a brief professional closing asking if the candidate has any questions before wrapping up.`
-    : `Based on the candidate's last answer, respond like a real interviewer: briefly acknowledge it and ask your NEXT single interview question (or an insightful follow-up). Remember: ask ONE question only, and no feedback!`
-}`;
-    }
-
-    const question = await generateWithFlash(prompt, systemInstruction);
+    const question = await generateWithFlash(contents, systemInstruction);
 
     // Validate generated question: treat empty or missing text as an error
     if (!question || !question.trim()) {

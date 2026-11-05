@@ -114,10 +114,10 @@ const SILENCE_MS = 1400; // 1.4s silence triggers speech completion
 const PROMPT_SILENCE_MS = 15000; // 15s silence triggers gentle reminder
 const MIN_WORDS_TO_SUBMIT = 2; // Fast submission for 2+ words
 
-// Fast request configuration to prevent hanging
-const MAX_REQUEST_RETRIES = 1; // 1 retry (2 fast attempts total)
-const RETRY_DELAY_MS = 1200; // 1.2s delay between retries
-const REQUEST_TIMEOUT_MS = 9000; // 9s timeout per attempt so user never waits 20+ seconds
+// Request configuration with 20s timeout and strict retry policy
+const MAX_REQUEST_RETRIES = 2; // up to 2 retries (important for 429 and 503)
+const RETRY_DELAY_MS = 2000; // 2s delay between retries
+const REQUEST_TIMEOUT_MS = 20000; // 20s timeout using AbortController
 
 function getSmartFallback(config: InterviewConfig, isFirst: boolean): string {
   const lang = config.language;
@@ -159,6 +159,7 @@ export default function InterviewRoom({
 
   // Connection error & retry state
   const [connectionError, setConnectionError] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const lastUserAnswerRef = useRef<string>('');
 
   // Conversation transcript state
@@ -616,7 +617,7 @@ export default function InterviewRoom({
   );
 
   // -------------------------------------------------------------
-  // 5. Robust Question Fetch Engine with Fast Fallback
+  // 5. Robust Question Fetch Engine with Smart Retry Policy
   // -------------------------------------------------------------
   const executeQuestionRequest = useCallback(
     async (
@@ -624,7 +625,8 @@ export default function InterviewRoom({
       isInitialGreeting: boolean
     ): Promise<boolean> => {
       let attempt = 0;
-      let lastError: Error | null = null;
+      let lastErrorMessage = '';
+      let isRetryable = false;
 
       while (attempt <= MAX_REQUEST_RETRIES) {
         if (isInterviewEndedRef.current) return false;
@@ -643,7 +645,7 @@ export default function InterviewRoom({
             try {
               controller.abort();
             } catch {}
-            reject(new Error('Request timed out after 9 seconds'));
+            reject(new Error('Request timed out after 20 seconds'));
           }, REQUEST_TIMEOUT_MS);
         });
 
@@ -666,17 +668,43 @@ export default function InterviewRoom({
           const data = (await res.json().catch(() => null)) as {
             question?: string;
             error?: string;
+            status?: number;
           } | null;
 
-          // Validate Gemini response
+          // Check for API errors or empty question response
           if (!res.ok || !data?.question || !data.question.trim()) {
+            const statusCode = res.status;
             const serverMsg =
-              data?.error || `HTTP ${res.status}: Empty or missing question response`;
-            throw new Error(serverMsg);
+              data?.error || `Error ${statusCode}: Failed to generate question`;
+
+            lastErrorMessage = serverMsg.startsWith('Error ')
+              ? serverMsg
+              : `Error ${statusCode}: ${serverMsg}`;
+
+            // Retry ONLY on 429, 503, 502, 504 and network/timeouts
+            // Do NOT retry 400 or other 4xx errors!
+            isRetryable =
+              statusCode === 429 ||
+              statusCode === 503 ||
+              statusCode === 502 ||
+              statusCode === 504;
+
+            console.error(
+              `[InterviewRoom] API error (status ${statusCode}):`,
+              serverMsg
+            );
+
+            if (!isRetryable) {
+              // 400 or other client error: stop retrying immediately!
+              break;
+            }
+
+            throw new Error(lastErrorMessage);
           }
 
           const nextQ = data.question.trim();
           setConnectionError(false);
+          setErrorMessage(null);
 
           const interviewerMessage: ChatMessage = {
             id: `interviewer-${Date.now()}`,
@@ -711,21 +739,32 @@ export default function InterviewRoom({
             return false;
           }
 
-          lastError = errorInstance instanceof Error ? errorInstance : new Error(String(err));
+          if (isTimedOut) {
+            lastErrorMessage = 'Error: Request timed out after 20 seconds';
+            isRetryable = true; // timeout is retryable
+          } else if (!lastErrorMessage) {
+            lastErrorMessage = errorInstance?.message || 'Network error occurred';
+            isRetryable = true; // network error is retryable
+          }
+
           console.warn(
-            `[InterviewRoom] Attempt ${attempt}/${MAX_REQUEST_RETRIES + 1} failed: ${lastError.message}`
+            `[InterviewRoom] Attempt ${attempt}/${MAX_REQUEST_RETRIES + 1} failed: ${lastErrorMessage}`
           );
 
-          // If retries remain, delay before next attempt
-          if (attempt <= MAX_REQUEST_RETRIES) {
-            await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS));
+          // If non-retryable or max retries exceeded, exit retry loop
+          if (!isRetryable || attempt > MAX_REQUEST_RETRIES) {
+            break;
           }
+
+          // Delay before next attempt
+          await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS));
         }
       }
 
-      // If all attempts failed:
+      // If all attempts failed or permanent error occurred:
       if (!isInterviewEndedRef.current) {
-        console.error('[InterviewRoom] Request failed or timed out:', lastError);
+        console.error('[InterviewRoom] Request failed permanently:', lastErrorMessage);
+        setErrorMessage(lastErrorMessage || 'Connection problem');
 
         // If this is the initial greeting, immediately start the interview with the contextual greeting!
         if (isInitialGreeting) {
@@ -1125,6 +1164,7 @@ export default function InterviewRoom({
 
     isRequestInFlightRef.current = true;
     setConnectionError(false);
+    setErrorMessage(null);
 
     const isInitial = messagesRef.current.length === 0;
 
@@ -1160,6 +1200,7 @@ export default function InterviewRoom({
     // 2. Reset all flags
     isRequestInFlightRef.current = false;
     setConnectionError(false);
+    setErrorMessage(null);
 
     // 3. Immediately ask next question / greeting via smart context fallback
     const isInitial = messagesRef.current.length === 0;
@@ -1376,15 +1417,22 @@ export default function InterviewRoom({
         {/* Dynamic Turn-Taking State Pill with Click-to-Advance & Retry */}
         <div className="mb-8 flex items-center justify-center">
           {connectionError ? (
-            <button
-              type="button"
-              onClick={handleRetry}
-              title="Connection problem. Tap to retry"
-              className="flex items-center gap-2.5 px-5 py-2 rounded-full bg-rose-500/20 hover:bg-rose-500/30 border border-rose-500/50 text-rose-300 text-xs font-semibold shadow-xl shadow-rose-500/20 backdrop-blur-xl transition-all cursor-pointer group animate-pulse"
-            >
-              <RotateCcw className="w-4 h-4 text-rose-400 group-hover:rotate-180 transition-transform duration-500" />
-              <span>Connection problem. Tap to retry</span>
-            </button>
+            <div className="flex flex-col items-center gap-2">
+              <button
+                type="button"
+                onClick={handleRetry}
+                title="Connection problem. Tap to retry"
+                className="flex items-center gap-2.5 px-5 py-2 rounded-full bg-rose-500/20 hover:bg-rose-500/30 border border-rose-500/50 text-rose-300 text-xs font-semibold shadow-xl shadow-rose-500/20 backdrop-blur-xl transition-all cursor-pointer group animate-pulse"
+              >
+                <RotateCcw className="w-4 h-4 text-rose-400 group-hover:rotate-180 transition-transform duration-500" />
+                <span>Connection problem. Tap to retry</span>
+              </button>
+              {errorMessage && (
+                <span className="text-[11px] text-rose-300/90 font-mono tracking-tight text-center max-w-sm sm:max-w-md truncate px-3 py-1 rounded-lg bg-rose-950/60 border border-rose-500/30 shadow-md">
+                  {errorMessage}
+                </span>
+              )}
+            </div>
           ) : turnState === 'USER_LISTENING' ? (
             <div className="flex items-center gap-2.5 px-5 py-2 rounded-full bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 text-xs font-semibold shadow-xl shadow-emerald-500/15 backdrop-blur-xl animate-pulse">
               <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping" />
@@ -1503,7 +1551,7 @@ export default function InterviewRoom({
           {connectionError ? (
             <div className="flex items-center gap-2 text-xs text-rose-400 font-medium">
               <span className="w-2 h-2 rounded-full bg-rose-400 animate-ping" />
-              <span>Network problem • Click retry button above</span>
+              <span>{errorMessage || 'Connection problem'} • Click retry button above</span>
             </div>
           ) : turnState === 'AI_SPEAKING' ? (
             [0.3, 0.7, 0.5, 0.95, 0.65, 1.0, 0.75, 0.9, 0.55, 0.8, 0.35].map((h, i) => (

@@ -22,11 +22,22 @@ export function getGenAI(): GoogleGenAI {
   return aiInstance;
 }
 
-// 7s timeout per model to give adequate response window without indefinite hanging
-const MODEL_TIMEOUT_MS = 7000;
+export type GeminiTurnPart = {
+  text: string;
+};
+
+export type GeminiContentTurn = {
+  role: 'user' | 'model';
+  parts: GeminiTurnPart[];
+};
+
+export type GeminiContents = string | GeminiContentTurn[];
+
+// 18s timeout per model to give adequate response window without indefinite hanging
+const MODEL_TIMEOUT_MS = 18000;
 
 export async function generateWithFlash(
-  prompt: string,
+  contents: GeminiContents,
   systemInstruction?: string
 ): Promise<string> {
   const ai = getGenAI();
@@ -36,7 +47,7 @@ export async function generateWithFlash(
     try {
       const generatePromise = ai.models.generateContent({
         model,
-        contents: prompt,
+        contents,
         config: systemInstruction
           ? {
               systemInstruction: systemInstruction,
