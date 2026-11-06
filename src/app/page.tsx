@@ -5,7 +5,8 @@ import SetupForm from '@/components/SetupForm';
 import InterviewRoom from '@/components/InterviewRoom';
 import SummaryScreen from '@/components/SummaryScreen';
 import { ChatMessage, InterviewConfig, InterviewSummary } from '@/types/interview';
-import { Bot, AlertCircle } from 'lucide-react';
+import Image from 'next/image';
+import { AlertCircle } from 'lucide-react';
 
 type AppScreen = 'setup' | 'interview' | 'summary';
 
@@ -107,8 +108,15 @@ export default function Home() {
             onClick={screen !== 'setup' ? undefined : handleRestart}
             className="flex items-center gap-2.5 cursor-pointer"
           >
-            <div className="w-8 h-8 rounded-xl bg-violet-600 flex items-center justify-center text-white">
-              <Bot className="w-4 h-4" />
+            <div className="w-8 h-8 rounded-xl bg-violet-600 flex items-center justify-center p-1 shadow-md shadow-violet-600/30 overflow-hidden">
+              <Image
+                src="/logo-white.png"
+                alt="InterviewAI Logo"
+                width={22}
+                height={22}
+                className="object-contain"
+                priority
+              />
             </div>
             <span className="text-base sm:text-lg font-black tracking-tight text-white">
               Interview
