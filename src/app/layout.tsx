@@ -16,6 +16,15 @@ export const metadata: Metadata = {
   title: 'InterviewAI — Next-Gen Voice Mock Interviews',
   description:
     'Real-time conversational mock interviews with an AI interviewer. Voice-driven, low latency, role-tailored with live feedback.',
+  icons: {
+    icon: [
+      { url: '/favicon.ico', sizes: 'any' },
+      { url: '/icon.png', type: 'image/png', sizes: '64x64' },
+    ],
+    apple: [
+      { url: '/apple-icon.png', sizes: '180x180', type: 'image/png' },
+    ],
+  },
 };
 
 export default function RootLayout({
