@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: 'InterviewAI — Next-Gen Voice Mock Interviews',
+  title: 'InterviewAI',
   description:
     'Real-time conversational mock interviews with an AI interviewer. Voice-driven, low latency, role-tailored with live feedback.',
   icons: {
