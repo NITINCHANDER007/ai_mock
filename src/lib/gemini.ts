@@ -33,8 +33,8 @@ export type GeminiContentTurn = {
 
 export type GeminiContents = string | GeminiContentTurn[];
 
-// 18s timeout per model to give adequate response window without indefinite hanging
-const MODEL_TIMEOUT_MS = 18000;
+// 14s timeout per model for fast turns without premature timeouts on detailed summaries
+const MODEL_TIMEOUT_MS = 14000;
 
 export async function generateWithFlash(
   contents: GeminiContents,

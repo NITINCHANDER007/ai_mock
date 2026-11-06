@@ -14,6 +14,7 @@ import {
   Check,
   Star,
   Target,
+  Award,
 } from 'lucide-react';
 import { InterviewConfig, InterviewSummary } from '@/types/interview';
 
@@ -80,7 +81,7 @@ export default function SummaryScreen({
 Role: ${config.role} (${config.experience})
 Score: ${score}/10 — ${theme.label}
 
-Key Strengths:
+${summary.dimensionScores && summary.dimensionScores.length > 0 ? `Competency Breakdown:\n${summary.dimensionScores.map((d) => `• ${d.name}: ${d.score}/10 - ${d.feedback}`).join('\n')}\n\n` : ''}Key Strengths:
 ${summary.strengths.map((s) => `• ${s}`).join('\n')}
 
 Areas for Improvement:
@@ -160,6 +161,70 @@ ${summary.feedback}`;
           </div>
         </div>
       </div>
+
+      {/* Role-Specific Competency Breakdown */}
+      {summary.dimensionScores && summary.dimensionScores.length > 0 && (
+        <div className="glass-panel rounded-3xl p-6 sm:p-7 border border-white/10 shadow-xl space-y-4">
+          <div className="flex items-center justify-between border-b border-white/5 pb-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-2xl bg-cyan-500/15 border border-cyan-500/30 flex items-center justify-center text-cyan-300 shadow-md shadow-cyan-500/10">
+                <Award className="w-5 h-5" />
+              </div>
+              <div>
+                <h2 className="font-bold text-white text-base">Role-Specific Competency Evaluation</h2>
+                <p className="text-[11px] text-slate-400">
+                  Targeted scoring on core dimensions for <span className="text-slate-200 font-semibold">{config.role}</span>
+                </p>
+              </div>
+            </div>
+            <span className="hidden sm:inline-flex px-3 py-1 rounded-full bg-slate-900/80 border border-white/10 text-xs text-slate-300 font-mono">
+              {summary.dimensionScores.length} Dimensions Assessed
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-1">
+            {summary.dimensionScores.map((ds, idx) => {
+              const dimScore = Math.round(ds.score * 10) / 10;
+              const barColor =
+                dimScore >= 8.5
+                  ? 'from-emerald-500 to-teal-400'
+                  : dimScore >= 7.0
+                  ? 'from-violet-500 to-indigo-400'
+                  : dimScore >= 5.5
+                  ? 'from-amber-500 to-orange-400'
+                  : 'from-rose-500 to-red-400';
+
+              return (
+                <div
+                  key={idx}
+                  className="p-4 rounded-2xl bg-slate-900/60 border border-white/5 space-y-2.5 hover:border-white/15 transition-all"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs sm:text-sm font-semibold text-slate-200">
+                      {ds.name}
+                    </span>
+                    <span className="text-xs font-mono font-bold text-white px-2 py-0.5 rounded-lg bg-slate-800 border border-white/10">
+                      {dimScore}/10
+                    </span>
+                  </div>
+
+                  {/* Visual Progress Bar */}
+                  <div className="w-full h-2 rounded-full bg-slate-800/80 overflow-hidden">
+                    <div
+                      className={`h-full rounded-full bg-gradient-to-r ${barColor} transition-all duration-700`}
+                      style={{ width: `${Math.min(100, Math.max(8, dimScore * 10))}%` }}
+                    />
+                  </div>
+
+                  <p className="text-[11px] text-slate-400 leading-relaxed font-normal">
+                    {ds.feedback}
+                  </p>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Two-Column Grid: Strengths & Growth Areas */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">

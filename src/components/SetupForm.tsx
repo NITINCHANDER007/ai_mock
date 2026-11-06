@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useId } from 'react';
+import React, { useState, useId, useMemo, useRef, useEffect } from 'react';
 import {
   Briefcase,
   Clock,
@@ -19,6 +19,9 @@ import {
   Award,
   Layers,
   ArrowRight,
+  Search,
+  PenTool,
+  X,
 } from 'lucide-react';
 import {
   ExperienceLevel,
@@ -27,18 +30,14 @@ import {
   InterviewLanguage,
   InterviewType,
 } from '@/types/interview';
+import { PRESET_ROLE_CONFIGS, RoleCategory } from '@/lib/roles';
 
-const PRESET_ROLES = [
-  'Software Engineer',
-  'Data Analyst',
-  'Product Manager',
-  'Designer',
-  'HR',
-  'Marketing',
-  'Sales',
-  'Customer Support',
-  'Other',
-];
+const CATEGORY_META: Record<RoleCategory, { icon: string; title: string }> = {
+  Tech: { icon: '💻', title: 'Tech Roles' },
+  HR: { icon: '🤝', title: 'HR & People Roles' },
+  'Non-Tech': { icon: '💼', title: 'Non-Tech & Business Roles' },
+  Other: { icon: '✨', title: 'Custom Role' },
+};
 
 const EXPERIENCE_OPTIONS: { label: string; desc: string; value: ExperienceLevel }[] = [
   { label: 'Fresher', desc: '0-1 yr exp', value: 'Fresher' },
@@ -73,9 +72,44 @@ interface SetupFormProps {
 
 export default function SetupForm({ onStart, isLoading }: SetupFormProps) {
   const roleListId = useId();
-  const [role, setRole] = useState('Software Engineer');
-  const [roleSearch, setRoleSearch] = useState('Software Engineer');
+  const [role, setRole] = useState('Software Engineer (general)');
+  const [isCustomRole, setIsCustomRole] = useState(false);
+  const [customRoleInput, setCustomRoleInput] = useState('');
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [highlightedIndex, setHighlightedIndex] = useState(-1);
+
+  const comboboxContainerRef = useRef<HTMLDivElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const listboxRef = useRef<HTMLDivElement>(null);
+
+  // Click outside listener to close dropdown
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (
+        comboboxContainerRef.current &&
+        !comboboxContainerRef.current.contains(event.target as Node)
+      ) {
+        setIsDropdownOpen(false);
+        setSearchQuery('');
+        setHighlightedIndex(-1);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, []);
+
+  // Autofocus search input when dropdown opens
+  useEffect(() => {
+    if (isDropdownOpen) {
+      const timer = setTimeout(() => {
+        searchInputRef.current?.focus();
+      }, 50);
+      return () => clearTimeout(timer);
+    }
+  }, [isDropdownOpen]);
 
   const [experience, setExperience] = useState<ExperienceLevel>('1-3 yrs');
   const [interviewType, setInterviewType] = useState<InterviewType>('Technical');
@@ -94,6 +128,86 @@ export default function SetupForm({ onStart, isLoading }: SetupFormProps) {
   const [jdFile, setJdFile] = useState<File | null>(null);
   const [isExtractingJd, setIsExtractingJd] = useState(false);
   const [jdError, setJdError] = useState<string | null>(null);
+
+  // Grouped search filtering
+  const groupedRoles = useMemo(() => {
+    const q = searchQuery.toLowerCase().trim();
+    const categories: RoleCategory[] = ['Tech', 'HR', 'Non-Tech'];
+    return categories.map((cat) => ({
+      category: cat,
+      roles: PRESET_ROLE_CONFIGS.filter(
+        (r) => r.category === cat && (!q || r.label.toLowerCase().includes(q))
+      ),
+    }));
+  }, [searchQuery]);
+
+  const totalFilteredPresets = useMemo(() => {
+    return groupedRoles.reduce((sum, g) => sum + g.roles.length, 0);
+  }, [groupedRoles]);
+
+  // Flattened options for keyboard navigation
+  const flattenedOptions = useMemo(() => {
+    const list: Array<{ id: string; label: string; isOther?: boolean }> = [];
+    for (const g of groupedRoles) {
+      for (const r of g.roles) {
+        list.push({ id: r.id, label: r.label });
+      }
+    }
+    list.push({ id: 'other-custom-role', label: 'Other (type your role)', isOther: true });
+    return list;
+  }, [groupedRoles]);
+
+  const activeDisplayRole = isCustomRole
+    ? (customRoleInput.trim() || 'Custom Professional Role')
+    : role;
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (!isDropdownOpen) {
+      if (e.key === 'ArrowDown' || e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        setIsDropdownOpen(true);
+      }
+      return;
+    }
+
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      setIsDropdownOpen(false);
+    } else if (e.key === 'Tab') {
+      setIsDropdownOpen(false);
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setHighlightedIndex((prev) => {
+        const next = prev + 1;
+        return next >= flattenedOptions.length ? 0 : next;
+      });
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setHighlightedIndex((prev) => {
+        const next = prev - 1;
+        return next < 0 ? flattenedOptions.length - 1 : next;
+      });
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (highlightedIndex >= 0 && highlightedIndex < flattenedOptions.length) {
+        const selected = flattenedOptions[highlightedIndex];
+        if (selected.isOther) {
+          setIsCustomRole(true);
+          setRole('Other');
+          setIsDropdownOpen(false);
+        } else {
+          setRole(selected.label);
+          setIsCustomRole(false);
+          setIsDropdownOpen(false);
+        }
+      } else if (searchQuery.trim() && totalFilteredPresets === 0) {
+        setIsCustomRole(true);
+        setCustomRoleInput(searchQuery.trim());
+        setRole('Other');
+        setIsDropdownOpen(false);
+      }
+    }
+  };
 
   // File upload handler
   const handleFileUpload = async (
@@ -162,13 +276,16 @@ export default function SetupForm({ onStart, isLoading }: SetupFormProps) {
     }
   };
 
-  const filteredRoles = PRESET_ROLES.filter((r) =>
-    r.toLowerCase().includes(roleSearch.toLowerCase())
-  );
-
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    const finalRole = roleSearch.trim() || role;
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      try {
+        window.speechSynthesis.resume();
+      } catch {}
+    }
+    const finalRole = isCustomRole
+      ? (customRoleInput.trim() || 'Custom Professional Role')
+      : role;
     onStart({
       role: finalRole,
       experience,
@@ -236,7 +353,7 @@ export default function SetupForm({ onStart, isLoading }: SetupFormProps) {
                   <Sparkles className="w-7 h-7 text-cyan-200" />
                 </div>
               </div>
-              <h4 className="text-sm font-bold text-white">{roleSearch || role}</h4>
+              <h4 className="text-sm font-bold text-white">{activeDisplayRole}</h4>
               <p className="text-xs text-slate-400 mt-0.5">
                 {interviewType} Round • {experience}
               </p>
@@ -321,97 +438,267 @@ export default function SetupForm({ onStart, isLoading }: SetupFormProps) {
             onSubmit={handleSubmit}
             className="glass-panel rounded-3xl p-6 sm:p-8 border border-white/10 shadow-2xl space-y-6"
           >
-            {/* Job Role: Searchable Combobox with quick chips */}
-            <div className="space-y-2">
+            {/* Target Job Role: Single Searchable Grouped Combobox */}
+            <div className="space-y-2 relative" ref={comboboxContainerRef}>
               <div className="flex items-center justify-between">
-                <label className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-slate-300">
+                <label
+                  id="target-job-role-label"
+                  className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-slate-300"
+                >
                   <Briefcase className="w-4 h-4 text-violet-400" />
                   Target Job Role
                 </label>
-                <span className="text-[11px] text-slate-400">Search or type custom</span>
+                <span className="text-[11px] text-slate-400">Search 30+ roles or type custom</span>
               </div>
 
-              <div className="relative">
-                <input
-                  type="text"
-                  value={roleSearch}
-                  onChange={(e) => {
-                    setRoleSearch(e.target.value);
-                    setRole(e.target.value);
-                    setIsDropdownOpen(true);
-                  }}
-                  onFocus={() => setIsDropdownOpen(true)}
-                  placeholder="e.g. Senior Backend Engineer, Product Manager"
-                  className="w-full px-4 py-3 rounded-2xl bg-slate-900/80 border border-white/10 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-violet-500/70 focus:border-transparent transition-all pr-10 shadow-inner"
-                  required
-                />
-                <button
-                  type="button"
-                  onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white p-1"
-                >
-                  <ChevronDown className={`w-4 h-4 transition-transform ${isDropdownOpen ? 'rotate-180' : ''}`} />
-                </button>
+              {/* Combobox Trigger Field (same dark glass style as other fields) */}
+              <div
+                role="combobox"
+                aria-expanded={isDropdownOpen}
+                aria-haspopup="listbox"
+                aria-controls={roleListId}
+                aria-labelledby="target-job-role-label"
+                tabIndex={0}
+                onClick={() => setIsDropdownOpen((prev) => !prev)}
+                onKeyDown={handleKeyDown}
+                className="w-full px-4 py-3.5 rounded-2xl bg-slate-900/80 border border-white/10 hover:border-violet-500/40 focus:border-violet-500/70 focus:ring-2 focus:ring-violet-500/50 text-sm text-slate-100 flex items-center justify-between cursor-pointer transition-all shadow-inner select-none outline-none group"
+              >
+                <div className="flex items-center gap-3 min-w-0 pr-2">
+                  <div className="w-7 h-7 rounded-lg bg-violet-600/20 border border-violet-500/30 flex items-center justify-center text-violet-400 shrink-0">
+                    <Briefcase className="w-3.5 h-3.5" />
+                  </div>
+                  <div className="truncate">
+                    <span className="font-semibold text-slate-100 block truncate">
+                      {isCustomRole
+                        ? (customRoleInput.trim() ? `Other: ${customRoleInput.trim()}` : 'Other (type custom role below)')
+                        : role}
+                    </span>
+                    <span className="text-[10px] text-slate-400 block -mt-0.5">
+                      {isCustomRole
+                        ? 'Custom role specification'
+                        : `${PRESET_ROLE_CONFIGS.find((r) => r.label === role)?.category || 'Tech'} Category`}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-1.5 shrink-0">
+                  {(isCustomRole || role !== 'Software Engineer (general)') && (
+                    <button
+                      type="button"
+                      title="Reset role selection"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setRole('Software Engineer (general)');
+                        setIsCustomRole(false);
+                        setCustomRoleInput('');
+                      }}
+                      className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                  <div className="p-1 text-slate-400 group-hover:text-white transition-colors">
+                    <ChevronDown
+                      className={`w-4 h-4 transition-transform duration-200 ${
+                        isDropdownOpen ? 'rotate-180 text-violet-400' : ''
+                      }`}
+                    />
+                  </div>
+                </div>
               </div>
 
-              {/* Quick Select Chips */}
-              <div className="flex flex-wrap gap-1.5 pt-1">
-                {PRESET_ROLES.slice(0, 5).map((r) => (
-                  <button
-                    key={r}
-                    type="button"
-                    onClick={() => {
-                      setRole(r);
-                      setRoleSearch(r);
-                    }}
-                    className={`px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all cursor-pointer ${
-                      roleSearch.toLowerCase() === r.toLowerCase()
-                        ? 'bg-violet-600 text-white shadow-sm shadow-violet-600/40'
-                        : 'bg-slate-800/60 hover:bg-slate-700/60 text-slate-300 border border-white/5'
-                    }`}
-                  >
-                    {r}
-                  </button>
-                ))}
-              </div>
-
+              {/* Dropdown Popover Panel */}
               {isDropdownOpen && (
-                <>
+                <div
+                  className="absolute left-0 right-0 top-full mt-2 z-50 bg-slate-900/98 border border-slate-700/80 rounded-2xl shadow-2xl backdrop-blur-2xl flex flex-col max-h-[320px] overflow-hidden animate-in fade-in zoom-in-95 duration-150"
+                  style={{ filter: 'drop-shadow(0 20px 25px rgba(0, 0, 0, 0.6))' }}
+                >
+                  {/* Pinned Search Input at Top */}
+                  <div className="p-2.5 bg-slate-950/90 border-b border-white/10 flex items-center gap-2 shrink-0">
+                    <Search className="w-4 h-4 text-violet-400 shrink-0 ml-1.5" />
+                    <input
+                      ref={searchInputRef}
+                      type="text"
+                      value={searchQuery}
+                      onChange={(e) => {
+                        setSearchQuery(e.target.value);
+                        setHighlightedIndex(0);
+                      }}
+                      onKeyDown={handleKeyDown}
+                      placeholder="Search 30+ roles (e.g. Recruiter, Sales, Frontend)..."
+                      className="w-full bg-transparent text-base sm:text-sm text-slate-100 placeholder-slate-500 focus:outline-none"
+                    />
+                    {searchQuery && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSearchQuery('');
+                          setHighlightedIndex(0);
+                          searchInputRef.current?.focus();
+                        }}
+                        className="p-1 text-slate-400 hover:text-white cursor-pointer"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Scrollable List with Sticky Category Headings */}
                   <div
-                    className="fixed inset-0 z-20"
-                    onClick={() => setIsDropdownOpen(false)}
-                  />
-                  <ul
+                    ref={listboxRef}
                     id={roleListId}
-                    className="absolute z-30 mt-1.5 w-full bg-slate-900/95 border border-slate-700/80 rounded-2xl shadow-2xl max-h-56 overflow-y-auto py-1 text-sm backdrop-blur-xl"
+                    role="listbox"
+                    aria-label="Roles list"
+                    className="flex-1 overflow-y-auto divide-y divide-white/5 scrollbar-thin scrollbar-thumb-slate-700"
                   >
-                    {filteredRoles.length > 0 ? (
-                      filteredRoles.map((item) => (
-                        <li
-                          key={item}
+                    {groupedRoles.map((group) => {
+                      if (group.roles.length === 0) return null;
+                      const meta = CATEGORY_META[group.category];
+                      return (
+                        <div key={group.category} role="group" aria-label={meta.title}>
+                          {/* Sticky Group Header */}
+                          <div className="sticky top-0 z-10 px-4 py-2 bg-slate-950/95 border-b border-white/5 backdrop-blur-md flex items-center justify-between text-[11px] font-bold uppercase tracking-wider text-violet-300">
+                            <span className="flex items-center gap-1.5">
+                              <span>{meta.icon}</span>
+                              <span>{meta.title}</span>
+                            </span>
+                            <span className="text-[10px] text-slate-500 font-normal">
+                              {group.roles.length} roles
+                            </span>
+                          </div>
+
+                          {/* Role Options */}
+                          {group.roles.map((r) => {
+                            const flatIndex = flattenedOptions.findIndex((item) => item.id === r.id);
+                            const isSelected = !isCustomRole && role === r.label;
+                            const isHighlighted = highlightedIndex === flatIndex;
+
+                            return (
+                              <div
+                                key={r.id}
+                                role="option"
+                                aria-selected={isSelected}
+                                onClick={() => {
+                                  setRole(r.label);
+                                  setIsCustomRole(false);
+                                  setIsDropdownOpen(false);
+                                }}
+                                onMouseEnter={() => setHighlightedIndex(flatIndex)}
+                                className={`min-h-[44px] px-4 py-2.5 flex items-center justify-between cursor-pointer transition-colors ${
+                                  isHighlighted
+                                    ? 'bg-violet-600/25 text-violet-200'
+                                    : isSelected
+                                    ? 'bg-violet-600/15 text-violet-200 font-semibold'
+                                    : 'text-slate-300 hover:bg-slate-800/60 hover:text-slate-100'
+                                }`}
+                              >
+                                <span className="text-xs sm:text-sm">{r.label}</span>
+                                {isSelected && (
+                                  <CheckCircle2 className="w-4 h-4 text-violet-400 shrink-0" />
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      );
+                    })}
+
+                    {/* Sticky "Other" Group Heading */}
+                    <div role="group" aria-label="Other / Custom Role">
+                      <div className="sticky top-0 z-10 px-4 py-2 bg-slate-950/95 border-b border-white/5 backdrop-blur-md flex items-center justify-between text-[11px] font-bold uppercase tracking-wider text-cyan-300">
+                        <span className="flex items-center gap-1.5">
+                          <span>✨</span>
+                          <span>Other / Custom Role</span>
+                        </span>
+                        <span className="text-[10px] text-slate-500 font-normal">Dynamic AI</span>
+                      </div>
+
+                      {/* "Other (type your role)" option */}
+                      {(() => {
+                        const otherFlatIndex = flattenedOptions.findIndex((item) => item.isOther);
+                        const isSelected = isCustomRole;
+                        const isHighlighted = highlightedIndex === otherFlatIndex;
+
+                        return (
+                          <div
+                            role="option"
+                            aria-selected={isSelected}
+                            onClick={() => {
+                              setIsCustomRole(true);
+                              setRole('Other');
+                              setIsDropdownOpen(false);
+                            }}
+                            onMouseEnter={() => setHighlightedIndex(otherFlatIndex)}
+                            className={`min-h-[44px] px-4 py-2.5 flex items-center justify-between cursor-pointer transition-colors ${
+                              isHighlighted
+                                ? 'bg-cyan-500/25 text-cyan-200'
+                                : isSelected
+                                ? 'bg-cyan-500/15 text-cyan-200 font-semibold'
+                                : 'text-cyan-300 hover:bg-slate-800/60'
+                            }`}
+                          >
+                            <div className="flex items-center gap-2">
+                              <span>✨</span>
+                              <span className="text-xs sm:text-sm font-medium">Other (type your role)</span>
+                            </div>
+                            {isSelected && <CheckCircle2 className="w-4 h-4 text-cyan-400 shrink-0" />}
+                          </div>
+                        );
+                      })()}
+
+                      {/* Empty state prompt if search has 0 preset matches */}
+                      {searchQuery.trim() && totalFilteredPresets === 0 && (
+                        <div
                           onClick={() => {
-                            setRole(item);
-                            setRoleSearch(item);
+                            setIsCustomRole(true);
+                            setCustomRoleInput(searchQuery.trim());
+                            setRole('Other');
                             setIsDropdownOpen(false);
                           }}
-                          className="px-4 py-2.5 hover:bg-violet-600/20 hover:text-violet-200 cursor-pointer flex items-center justify-between text-slate-300 transition-colors"
+                          className="min-h-[44px] px-4 py-2.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 text-xs flex items-center justify-between cursor-pointer border-t border-amber-500/20 transition-colors"
                         >
-                          <span>{item}</span>
-                          {roleSearch === item && (
-                            <CheckCircle2 className="w-4 h-4 text-violet-400" />
-                          )}
-                        </li>
-                      ))
-                    ) : (
-                      <li
-                        onClick={() => setIsDropdownOpen(false)}
-                        className="px-4 py-2.5 text-slate-400 italic cursor-pointer hover:bg-slate-800"
-                      >
-                        Keep custom title: &quot;{roleSearch}&quot;
-                      </li>
-                    )}
-                  </ul>
-                </>
+                          <span>No role found - click to use &quot;{searchQuery.trim()}&quot;</span>
+                          <ArrowRight className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Custom Role Input when "Other" is chosen */}
+              {isCustomRole && (
+                <div className="p-3.5 rounded-2xl bg-gradient-to-r from-violet-950/40 via-slate-900 to-cyan-950/40 border border-cyan-500/40 space-y-2 animate-in fade-in duration-300">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[11px] font-semibold text-cyan-300 flex items-center gap-1.5">
+                      <PenTool className="w-3.5 h-3.5 text-cyan-400" />
+                      Specify Your Custom Job Role Title
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsCustomRole(false);
+                        setRole('Software Engineer (general)');
+                        setCustomRoleInput('');
+                      }}
+                      className="text-[10px] text-slate-400 hover:text-slate-200 underline cursor-pointer"
+                    >
+                      Switch to presets
+                    </button>
+                  </div>
+                  <input
+                    type="text"
+                    value={customRoleInput}
+                    onChange={(e) => setCustomRoleInput(e.target.value)}
+                    placeholder="e.g. Chief of Staff, Bioinformatician, Developer Advocate, Flight Attendant"
+                    className="w-full px-4 py-2.5 rounded-xl bg-slate-950/80 border border-cyan-400/30 text-sm text-cyan-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-cyan-400/60"
+                    required={isCustomRole}
+                    autoFocus
+                  />
+                  <p className="text-[10px] text-slate-400">
+                    Gemini will dynamically generate role-specific competencies, scenarios, and scoring criteria for this title.
+                  </p>
+                </div>
               )}
             </div>
 

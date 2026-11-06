@@ -161,39 +161,41 @@ function getSmartFallback(
   isFirst: boolean
 ): { text: string; type: 'new_question' | 'follow_up' | 'closing' } {
   const lang = config.language;
+  const roleTitle = config.role || 'this position';
+
   if (isFirst) {
     if (lang === 'Hindi') {
       return {
-        text: 'नमस्ते! साक्षात्कार में आपका स्वागत है। बातचीत शुरू करने के लिए, कृपया अपने और अपने अनुभव के बारे में संक्षेप में बताइए।',
+        text: `नमस्ते! ${roleTitle} पद के साक्षात्कार में आपका स्वागत है। बातचीत शुरू करने के लिए, कृपया अपने और अपने अनुभव के बारे में संक्षेप में बताइए।`,
         type: 'new_question',
       };
     }
     if (lang === 'Hinglish') {
       return {
-        text: 'Hello, welcome to your mock interview! To get started, please apne background aur experience ke baare me thoda batayein.',
+        text: `Hello, welcome to your mock interview for ${roleTitle}! To get started, please apne background aur experience ke baare me thoda batayein.`,
         type: 'new_question',
       };
     }
     return {
-      text: "Welcome to the interview! It's a pleasure to connect with you today. To get started, could you please introduce yourself and walk me through your background?",
+      text: `Welcome to the interview for ${roleTitle}! It's a pleasure to connect with you today. To get started, could you please introduce yourself and walk me through your relevant background?`,
       type: 'new_question',
     };
   }
 
   if (lang === 'Hindi') {
     return {
-      text: 'धन्यवाद। क्या आप अपने हालिया काम में आई किसी मुख्य तकनीकी चुनौती और उसे हल करने के अपने दृष्टिकोण के बारे में बता सकते हैं?',
+      text: `धन्यवाद। क्या आप ${roleTitle} के रूप में अपने हालिया काम में आई किसी मुख्य चुनौती और उसे हल करने के अपने दृष्टिकोण के बारे में बता सकते हैं?`,
       type: 'new_question',
     };
   }
   if (lang === 'Hinglish') {
     return {
-      text: 'Understood. Aap apne most recent project me jo complex challenge solve kiya, uske baare me thoda detail me explain karenge?',
+      text: `Understood. Aap apne ${roleTitle} role me jo complex challenge solve kiya, uske baare me thoda detail me explain karenge?`,
       type: 'new_question',
     };
   }
   return {
-    text: 'Thank you for sharing that. Could you describe a challenging technical or workplace problem you encountered recently, and how you approached resolving it?',
+    text: `Thank you for sharing that. Could you describe a challenging scenario you encountered recently in your work as a ${roleTitle}, and how you approached resolving it?`,
     type: 'new_question',
   };
 }
@@ -612,6 +614,7 @@ export default function InterviewRoom({
       isInterruptedRef.current = false;
 
       // IMMEDIATELY transition to AI_SPEAKING and update captions so UI never hangs
+      turnStateRef.current = 'AI_SPEAKING';
       dispatch({ type: 'START_AI_SPEAKING' });
       setCaptionSpeaker('AI');
       setCaptionText(text);
@@ -701,7 +704,8 @@ export default function InterviewRoom({
           finalTranscriptRef.current = '';
           currentSpokenTextRef.current = '';
 
-          if (turnStateRef.current === 'AI_SPEAKING') {
+          if (!isInterruptedRef.current) {
+            turnStateRef.current = 'USER_LISTENING';
             if (onEnd) {
               onEnd();
             } else {
@@ -854,9 +858,10 @@ export default function InterviewRoom({
             }),
           };
 
-          setMessages((prev) =>
-            isInitialGreeting ? [interviewerMessage] : [...prev, interviewerMessage]
-          );
+          messagesRef.current = isInitialGreeting
+            ? [interviewerMessage]
+            : [...messagesRef.current, interviewerMessage];
+          setMessages(messagesRef.current);
           setCurrentAiQuestion(nextQ);
 
           speak(nextQ, () => {
@@ -917,7 +922,9 @@ export default function InterviewRoom({
               minute: '2-digit',
             }),
           };
-          setMessages([initialMsg]);
+          messagesRef.current = [initialMsg];
+          messagesRef.current = [initialMsg];
+        setMessages([initialMsg]);
           setCurrentAiQuestion(fallback.text);
           speak(fallback.text, () => {
             if (!isInterviewEndedRef.current) {
@@ -1315,6 +1322,7 @@ export default function InterviewRoom({
             minute: '2-digit',
           }),
         };
+        messagesRef.current = [initialMsg];
         setMessages([initialMsg]);
         setCurrentAiQuestion(fallback.text);
         speak(fallback.text, () => {
@@ -1326,6 +1334,30 @@ export default function InterviewRoom({
         // ALWAYS reset isRequestInFlight to false in finally
         isRequestInFlightRef.current = false;
         abortControllerRef.current = null;
+
+        // Guaranteed safety check: if no message was loaded, immediately speak smart contextual greeting
+        if (messagesRef.current.length === 0 && !isInterviewEndedRef.current) {
+          const fallback = getSmartFallback(config, true);
+          setMainQuestionIndex(1);
+          const initialMsg: ChatMessage = {
+            id: `interviewer-${Date.now()}`,
+            role: 'interviewer',
+            content: fallback.text,
+            timestamp: new Date().toLocaleTimeString([], {
+              hour: '2-digit',
+              minute: '2-digit',
+            }),
+          };
+          messagesRef.current = [initialMsg];
+          messagesRef.current = [initialMsg];
+        setMessages([initialMsg]);
+          setCurrentAiQuestion(fallback.text);
+          speak(fallback.text, () => {
+            if (!isInterviewEndedRef.current) {
+              dispatch({ type: 'START_USER_LISTENING' });
+            }
+          });
+        }
       }
     }
 
@@ -1449,7 +1481,8 @@ export default function InterviewRoom({
       }),
     };
 
-    setMessages((prev) => (isInitial ? [newMsg] : [...prev, newMsg]));
+    messagesRef.current = isInitial ? [newMsg] : [...messagesRef.current, newMsg];
+    setMessages(messagesRef.current);
     setCurrentAiQuestion(fallback.text);
 
     speak(fallback.text, () => {

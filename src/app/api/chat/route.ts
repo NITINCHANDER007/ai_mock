@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { generateWithFlash, GEMINI_MODEL, GeminiContentTurn } from '@/lib/gemini';
 import { ChatMessage, InterviewConfig } from '@/types/interview';
+import { getOrGenerateRoleConfig } from '@/lib/roles-server';
 
 function convertToGeminiContents(
   messages: ChatMessage[],
@@ -92,6 +93,32 @@ export async function POST(req: NextRequest) {
     ).length;
     const isNearEnd = questionsAskedSoFar >= totalQuestionsTarget;
 
+    // Retrieve role-specific configuration and competencies
+    const roleConfig = await getOrGenerateRoleConfig(config.role);
+    const competenciesList = roleConfig.competencies.map((c) => `- ${c}`).join('\n');
+    const topicsList = roleConfig.topicAreas.map((t) => `- ${t}`).join('\n');
+    const scenariosList = roleConfig.sampleScenarios.map((s) => `• ${s}`).join('\n');
+
+    // Role-play injection for roles that benefit from interactive simulation
+    let rolePlayGuideline = '';
+    const lowerRole = config.role.toLowerCase();
+    if (lowerRole.includes('sales') || lowerRole.includes('business development')) {
+      rolePlayGuideline = `\nROLE-PLAY SIMULATION INSTRUCTION:
+For sales scenarios, act as a realistic, hesitant, or skeptical prospect/customer. Challenge the candidate with common commercial objections (e.g. "Your price is 40% higher than your competitor", "We are freezing software spend this quarter"). Evaluate their ability to uncover pain, ask discovery questions, and close without being overly pushy.`;
+    } else if (lowerRole.includes('support') || lowerRole.includes('customer success')) {
+      rolePlayGuideline = `\nROLE-PLAY SIMULATION INSTRUCTION:
+For customer support scenarios, act as a frustrated, confused, or impatient customer experiencing a critical issue (e.g., account locked, payment charged twice, broken workflow). Test their empathy, patience, de-escalation, step-by-step troubleshooting, and clear communication.`;
+    } else if (lowerRole.includes('talent acquisition') || lowerRole.includes('recruiter') || lowerRole.includes('hr')) {
+      rolePlayGuideline = `\nROLE-PLAY & SITUATIONAL SIMULATION:
+Simulate realistic day-to-day HR/TA challenges: act as a demanding hiring manager with unrealistic salary expectations or tight deadlines, test their negotiation tactics when a star candidate has a higher competing offer, and probe their sourcing strategies and recruitment metrics (time-to-hire, offer drop-off, sourcing funnels).`;
+    } else if (lowerRole.includes('consulting')) {
+      rolePlayGuideline = `\nCASE INTERVIEW INSTRUCTION:
+Run an interactive, structured case study. Present a concrete business problem (e.g., declining profitability, market sizing, market entry), push the candidate to state their assumptions, construct a MECE issue tree, and solve quantitative mental math steps.`;
+    } else if (roleConfig.category === 'Tech') {
+      rolePlayGuideline = `\nPRACTICAL ENGINEERING INSTRUCTION:
+Focus strictly on practical real-world engineering situations (debugging edge cases, production outages, architectural trade-offs, performance optimization, concurrency, testing, and security). DO NOT ask textbook definition questions. Ask "How would you solve X when Y breaks?"`;
+    }
+
     // Language guidelines
     let languageInstruction = '';
     if (config.language === 'Hindi') {
@@ -102,20 +129,40 @@ export async function POST(req: NextRequest) {
       languageInstruction = `STRICT LANGUAGE REQUIREMENT: Speak in fluent, professional, clear English.`;
     }
 
-    // Experience difficulty guidelines
+    // Experience difficulty depth ladder
     let expGuideline = '';
     if (config.experience === 'Fresher') {
-      expGuideline = `Target level: Fresher / Entry-Level. Focus on fundamental concepts, college projects, academic coursework, problem-solving mindset, and willingness to learn.`;
+      expGuideline = `CANDIDATE EXPERIENCE DEPTH (Fresher / Entry-Level):
+- Focus on fundamental principles, college/internship projects, problem-solving curiosity, foundational concepts of ${roleConfig.label}, and willingness to learn.
+- Be supportive yet rigorous about baseline conceptual clarity.`;
     } else if (config.experience === '1-3 yrs') {
-      expGuideline = `Target level: 1-3 years experience (Mid-junior). Focus on practical engineering, real production challenges faced, code organization, debugging, teamwork, and domain tools.`;
+      expGuideline = `CANDIDATE EXPERIENCE DEPTH (1-3 years / Mid-level):
+- Focus on practical day-to-day execution, real production challenges they personally handled, debugging and edge-case resolution, working with cross-functional partners, and domain tooling/metrics.
+- Verify what part THEY specifically owned versus what their team did.`;
     } else {
-      expGuideline = `Target level: 3+ years experience (Senior / Lead). Focus on architectural decisions, trade-offs, system scalability, handling edge cases, cross-team collaboration, and leadership.`;
+      expGuideline = `CANDIDATE EXPERIENCE DEPTH (3+ years / Senior & Lead):
+- Focus on strategic decisions, system architecture trade-offs, scaling bottlenecks, organizational influence, failure recovery, mentorship, and business impact.
+- Probe why alternative approaches were rejected and how they handled ambiguity.`;
     }
 
     // System instruction passed via config.systemInstruction, NOT as a history message
-    const systemInstruction = `You are a professional, realistic mock interviewer conducting a ${config.type} interview for the position of "${config.role}". Model: ${GEMINI_MODEL}.
+    const systemInstruction = `You are a professional, realistic mock interviewer conducting a ${config.type} interview for the position of "${roleConfig.label}". Model: ${GEMINI_MODEL}.
 ${languageInstruction}
 ${expGuideline}
+
+ROLE PROFILE & COMPETENCIES:
+Role Title: ${roleConfig.label} (${roleConfig.category} Category)
+Interview Style: ${roleConfig.interviewStyle}
+
+Key Competencies to Assess:
+${competenciesList}
+
+Core Day-to-Day Topics & Workflows:
+${topicsList}
+
+Realistic Workplace Scenarios to Draw From:
+${scenariosList}
+${rolePlayGuideline}
 
 INTERVIEW RULES:
 1. Act strictly as the interviewer. Stay in character at all times.

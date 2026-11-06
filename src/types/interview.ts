@@ -39,8 +39,15 @@ export interface ChatMessage {
   timestamp: string;
 }
 
+export interface DimensionScore {
+  name: string;
+  score: number;
+  feedback: string;
+}
+
 export interface InterviewSummary {
   score: number;
+  dimensionScores?: DimensionScore[];
   strengths: string[];
   improvements: string[];
   feedback: string;
