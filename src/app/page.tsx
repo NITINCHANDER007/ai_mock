@@ -100,37 +100,22 @@ export default function Home() {
 
   return (
     <div className="min-h-screen bg-mesh-gradient text-slate-100 flex flex-col font-sans selection:bg-violet-500 selection:text-white">
-      {/* Sleek Glass Navbar */}
+      {/* Navbar */}
       <header className="sticky top-0 z-30 bg-slate-950/70 backdrop-blur-xl border-b border-white/10">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between">
           <div
             onClick={screen !== 'setup' ? undefined : handleRestart}
-            className="flex items-center gap-3 cursor-pointer group"
+            className="flex items-center gap-2.5 cursor-pointer"
           >
-            <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-violet-600 via-indigo-600 to-cyan-500 flex items-center justify-center text-white shadow-lg shadow-violet-600/30 group-hover:scale-105 transition-transform">
-              <Bot className="w-5 h-5 text-cyan-200" />
+            <div className="w-8 h-8 rounded-xl bg-violet-600 flex items-center justify-center text-white">
+              <Bot className="w-4 h-4" />
             </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="text-lg font-black tracking-tight text-white">
-                  Interview
-                  <span className="bg-gradient-to-r from-violet-400 to-cyan-400 bg-clip-text text-transparent">
-                    AI
-                  </span>
-                </span>
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-violet-500/20 text-violet-300 border border-violet-500/40 uppercase tracking-wider">
-                  Pro
-                </span>
-              </div>
-              <p className="text-[11px] text-slate-400 -mt-0.5 font-medium">
-                Autonomous Mock Interviewer
-              </p>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-900/60 border border-white/10 text-xs text-slate-300 backdrop-blur-md">
-            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-            <span className="font-medium text-[11px] text-slate-300">Gemini Flash 3.8</span>
+            <span className="text-base sm:text-lg font-black tracking-tight text-white">
+              Interview
+              <span className="bg-gradient-to-r from-violet-400 to-cyan-400 bg-clip-text text-transparent">
+                AI
+              </span>
+            </span>
           </div>
         </div>
       </header>
@@ -166,9 +151,14 @@ export default function Home() {
         )}
       </main>
 
-      {/* Minimalist Glass Footer */}
-      <footer className="border-t border-white/5 bg-slate-950/60 py-4 text-center text-xs text-slate-500 backdrop-blur-md">
-        <p>InterviewAI • Voice-Powered Autonomous Interview Simulation</p>
+      {/* Footer */}
+      <footer className="border-t border-white/5 py-4 text-center text-xs text-slate-500">
+        <p>
+          Interview
+          <span className="bg-gradient-to-r from-violet-400 to-cyan-400 bg-clip-text text-transparent font-bold">
+            AI
+          </span>
+        </p>
       </footer>
     </div>
   );

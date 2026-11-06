@@ -10,13 +10,8 @@ import {
   CheckCircle2,
   AlertCircle,
   Loader2,
-  Sparkles,
   ChevronDown,
   UserCheck,
-  Zap,
-  Mic,
-  BrainCircuit,
-  Award,
   Layers,
   ArrowRight,
   Search,
@@ -157,9 +152,6 @@ export default function SetupForm({ onStart, isLoading }: SetupFormProps) {
     return list;
   }, [groupedRoles]);
 
-  const activeDisplayRole = isCustomRole
-    ? (customRoleInput.trim() || 'Custom Professional Role')
-    : role;
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (!isDropdownOpen) {
@@ -298,158 +290,40 @@ export default function SetupForm({ onStart, isLoading }: SetupFormProps) {
   };
 
   return (
-    <div className="w-full max-w-6xl mx-auto space-y-8 py-2">
-      {/* Hero Badge & Title */}
-      <div className="text-center space-y-3">
-        <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-violet-500/10 border border-violet-500/30 text-violet-300 text-xs font-medium backdrop-blur-md shadow-inner shadow-violet-500/20">
-          <Sparkles className="w-3.5 h-3.5 text-violet-400 animate-spin" style={{ animationDuration: '6s' }} />
-          <span>Next-Gen Voice Mock Interviews</span>
-          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse ml-1" />
-          <span className="text-[10px] text-emerald-300 font-semibold uppercase tracking-wider">Live</span>
-        </div>
+    <div className="w-full max-w-[640px] mx-auto space-y-6 py-4">
+      {/* Title */}
+      <div className="relative text-center space-y-2.5 pt-2">
+        {/* Ambient atmospheric backlight */}
+        <div className="absolute left-1/2 -translate-x-1/2 -top-6 w-80 h-32 bg-gradient-to-r from-violet-600/20 via-indigo-500/15 to-cyan-500/20 blur-3xl rounded-full pointer-events-none -z-10" />
 
-        <h1 className="text-3xl sm:text-5xl font-extrabold tracking-tight text-white leading-tight">
-          Master Your Next Interview with{' '}
-          <span className="bg-gradient-to-r from-violet-400 via-indigo-300 to-cyan-400 bg-clip-text text-transparent">
-            InterviewAI
+        {/* Creative Headline */}
+        <h1 className="text-3xl sm:text-4xl md:text-[42px] font-extrabold tracking-tight text-white leading-tight">
+          Test yourself before{' '}
+          <span className="bg-gradient-to-r from-violet-400 via-indigo-300 to-cyan-300 bg-clip-text text-transparent">
+            they test you
           </span>
         </h1>
-        <p className="text-sm sm:text-base text-slate-400 max-w-2xl mx-auto font-normal">
-          Real-time spoken mock interviews with an intelligent AI recruiter. Speak naturally, receive smart follow-ups, and get detailed instant feedback.
+
+        {/* Subtitle - Motivational confidence booster */}
+        <p className="text-sm sm:text-base text-slate-300/90 max-w-lg mx-auto leading-relaxed">
+          Confidence comes from preparation. Practice out loud and walk in ready to own the room.
         </p>
       </div>
 
-      {/* Main 2-Column Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-        {/* Left Column: Interactive Live Preview & Feature Badges */}
-        <div className="lg:col-span-5 space-y-5">
-          {/* Live Session Blueprint Card */}
-          <div className="glass-panel rounded-3xl p-6 border border-white/10 shadow-2xl relative overflow-hidden">
-            {/* Ambient background glow inside card */}
-            <div className="absolute top-0 right-0 w-48 h-48 bg-violet-600/15 rounded-full blur-3xl pointer-events-none" />
-            <div className="absolute bottom-0 left-0 w-48 h-48 bg-cyan-600/15 rounded-full blur-3xl pointer-events-none" />
-
-            <div className="flex items-center justify-between pb-4 border-b border-white/5">
-              <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-violet-600 to-indigo-500 flex items-center justify-center text-white shadow-md shadow-violet-600/40">
-                  <BrainCircuit className="w-4 h-4" />
-                </div>
-                <div>
-                  <h3 className="text-xs font-semibold text-slate-200">Session Blueprint</h3>
-                  <p className="text-[10px] text-slate-400">Configured in real-time</p>
-                </div>
-              </div>
-              <span className="px-2.5 py-1 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-[10px] text-emerald-300 font-semibold flex items-center gap-1.5">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
-                Ready
-              </span>
-            </div>
-
-            {/* Simulated AI Interviewer Visual */}
-            <div className="my-6 p-5 rounded-2xl bg-slate-950/60 border border-white/5 flex flex-col items-center justify-center text-center relative">
-              <div className="relative mb-3 flex items-center justify-center">
-                <div className="w-20 h-20 rounded-full bg-gradient-to-tr from-violet-600/40 to-cyan-500/30 blur-md absolute animate-pulse" />
-                <div className="w-16 h-16 rounded-full bg-gradient-to-br from-violet-600 via-indigo-600 to-slate-900 border-2 border-violet-400/60 flex items-center justify-center text-white relative z-10 shadow-xl shadow-violet-600/40">
-                  <Sparkles className="w-7 h-7 text-cyan-200" />
-                </div>
-              </div>
-              <h4 className="text-sm font-bold text-white">{activeDisplayRole}</h4>
-              <p className="text-xs text-slate-400 mt-0.5">
-                {interviewType} Round • {experience}
-              </p>
-
-              {/* Mini voice wave simulation */}
-              <div className="flex items-center gap-1 mt-4 h-6">
-                {[0.4, 0.8, 0.5, 1.0, 0.7, 0.9, 0.4].map((h, i) => (
-                  <span
-                    key={i}
-                    className="w-1 bg-gradient-to-t from-violet-500 to-cyan-400 rounded-full animate-pulse"
-                    style={{
-                      height: `${h * 20}px`,
-                      animationDuration: `${0.4 + (i % 3) * 0.15}s`,
-                    }}
-                  />
-                ))}
-              </div>
-            </div>
-
-            {/* Real-time configuration summary pill grid */}
-            <div className="grid grid-cols-2 gap-2 text-xs">
-              <div className="p-2.5 rounded-xl bg-slate-900/60 border border-white/5">
-                <span className="text-[10px] text-slate-500 block uppercase font-bold tracking-wider">Duration</span>
-                <span className="font-semibold text-slate-200 mt-0.5 block">{duration} Minutes</span>
-              </div>
-              <div className="p-2.5 rounded-xl bg-slate-900/60 border border-white/5">
-                <span className="text-[10px] text-slate-500 block uppercase font-bold tracking-wider">Language</span>
-                <span className="font-semibold text-slate-200 mt-0.5 block">{language}</span>
-              </div>
-              <div className="p-2.5 rounded-xl bg-slate-900/60 border border-white/5">
-                <span className="text-[10px] text-slate-500 block uppercase font-bold tracking-wider">Resume</span>
-                <span className={`font-semibold mt-0.5 block ${resumeText ? 'text-emerald-400' : 'text-slate-400'}`}>
-                  {resumeText ? 'Attached ✓' : 'Not Provided'}
-                </span>
-              </div>
-              <div className="p-2.5 rounded-xl bg-slate-900/60 border border-white/5">
-                <span className="text-[10px] text-slate-500 block uppercase font-bold tracking-wider">Target JD</span>
-                <span className={`font-semibold mt-0.5 block ${jdText ? 'text-emerald-400' : 'text-slate-400'}`}>
-                  {jdText ? 'Custom Context ✓' : 'Role Standard'}
-                </span>
-              </div>
-            </div>
-          </div>
-
-          {/* Quick value badges */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <div className="p-3.5 rounded-2xl glass-card flex items-center gap-3">
-              <div className="p-2 rounded-xl bg-violet-500/15 text-violet-400 shrink-0">
-                <Mic className="w-4 h-4" />
-              </div>
-              <div>
-                <p className="text-xs font-semibold text-slate-200">Zero Click</p>
-                <p className="text-[10px] text-slate-400">Natural voice flow</p>
-              </div>
-            </div>
-
-            <div className="p-3.5 rounded-2xl glass-card flex items-center gap-3">
-              <div className="p-2 rounded-xl bg-cyan-500/15 text-cyan-400 shrink-0">
-                <Zap className="w-4 h-4" />
-              </div>
-              <div>
-                <p className="text-xs font-semibold text-slate-200">Flash Speed</p>
-                <p className="text-[10px] text-slate-400">Sub-second turns</p>
-              </div>
-            </div>
-
-            <div className="p-3.5 rounded-2xl glass-card flex items-center gap-3">
-              <div className="p-2 rounded-xl bg-emerald-500/15 text-emerald-400 shrink-0">
-                <Award className="w-4 h-4" />
-              </div>
-              <div>
-                <p className="text-xs font-semibold text-slate-200">Scored Feedback</p>
-                <p className="text-[10px] text-slate-400">STAR analysis</p>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Right Column: Setup Form */}
-        <div className="lg:col-span-7">
-          <form
-            onSubmit={handleSubmit}
-            className="glass-panel rounded-3xl p-6 sm:p-8 border border-white/10 shadow-2xl space-y-6"
+      {/* Centered Form Card */}
+      <form
+        onSubmit={handleSubmit}
+        className="glass-panel rounded-2xl p-6 sm:p-7 border border-white/10 space-y-5"
+      >
+        {/* Target Job Role: Single Searchable Grouped Combobox */}
+        <div className="space-y-2 relative" ref={comboboxContainerRef}>
+          <label
+            id="target-job-role-label"
+            className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-slate-300"
           >
-            {/* Target Job Role: Single Searchable Grouped Combobox */}
-            <div className="space-y-2 relative" ref={comboboxContainerRef}>
-              <div className="flex items-center justify-between">
-                <label
-                  id="target-job-role-label"
-                  className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-slate-300"
-                >
-                  <Briefcase className="w-4 h-4 text-violet-400" />
-                  Target Job Role
-                </label>
-                <span className="text-[11px] text-slate-400">Search 30+ roles or type custom</span>
-              </div>
+            <Briefcase className="w-4 h-4 text-violet-400" />
+            Target Job Role
+          </label>
 
               {/* Combobox Trigger Field (same dark glass style as other fields) */}
               <div
@@ -954,28 +828,25 @@ export default function SetupForm({ onStart, isLoading }: SetupFormProps) {
               )}
             </div>
 
-            {/* Launch Button */}
-            <button
-              type="submit"
-              disabled={isLoading || isExtractingResume || isExtractingJd}
-              className="w-full py-4 px-6 rounded-2xl bg-gradient-to-r from-violet-600 via-indigo-600 to-cyan-500 hover:from-violet-500 hover:via-indigo-500 hover:to-cyan-400 active:scale-[0.99] text-white font-bold text-sm sm:text-base shadow-xl shadow-violet-600/30 flex items-center justify-center gap-3 transition-all cursor-pointer glow-btn disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {isLoading ? (
-                <>
-                  <Loader2 className="w-5 h-5 animate-spin" />
-                  <span>Launching Studio...</span>
-                </>
-              ) : (
-                <>
-                  <Sparkles className="w-5 h-5 text-cyan-200" />
-                  <span>Start Mock Interview</span>
-                  <ArrowRight className="w-5 h-5 text-cyan-200" />
-                </>
-              )}
-            </button>
-          </form>
-        </div>
-      </div>
+        {/* Launch Button */}
+        <button
+          type="submit"
+          disabled={isLoading || isExtractingResume || isExtractingJd}
+          className="w-full py-3.5 px-6 rounded-xl bg-violet-600 hover:bg-violet-500 active:bg-violet-700 text-white font-semibold text-sm sm:text-base flex items-center justify-center gap-2 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {isLoading ? (
+            <>
+              <Loader2 className="w-5 h-5 animate-spin" />
+              <span>Starting Interview...</span>
+            </>
+          ) : (
+            <>
+              <span>Start Interview</span>
+              <ArrowRight className="w-4 h-4" />
+            </>
+          )}
+        </button>
+      </form>
     </div>
   );
 }
